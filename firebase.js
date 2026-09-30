@@ -14,3 +14,6 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+
+// Служебный домен для ника
+export const NICK_DOMAIN = "schedule.local";
