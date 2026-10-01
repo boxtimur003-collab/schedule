@@ -3,6 +3,9 @@ import { useRouter } from "next/router";
 import { db } from "../firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import Layout from "../components/Layout";
+import SaveIcon from "../components/icons/SaveIcon";
+import GithubIcon from "../components/icons/GithubIcon";
+import FirebaseIcon from "../components/icons/FirebaseIcon";
 
 const GRADES = ["10А", "10Б", "10В", "10Г"];
 const GROUPS = ["1", "2"];
@@ -23,7 +26,7 @@ export default function Admin() {
     const u = JSON.parse(stored);
     if (u.role !== "admin") return router.push("/schedule");
     setUser(u);
-    loadFor(u.grade, u.group);
+    loadFor("10А", "1");
   }, []);
 
   const loadFor = async (g, gr) => {
@@ -56,7 +59,7 @@ export default function Admin() {
     const data = parse(text);
     const id = `${grade}-${group}`;
     await setDoc(doc(db, "schedules", id), data);
-    showToast(`Сохранено: ${id}`);
+    showToast(`Firestore: ${id} сохранено`);
     setSaving(false);
   };
 
@@ -82,6 +85,23 @@ export default function Admin() {
   const saveBoth = async () => {
     await saveToFirestore();
     await saveToGithub();
+  };
+
+  const copyFrom = async () => {
+    const from = prompt("Скопировать из (формат: 10А-1):");
+    if (!from) return;
+    const snap = await getDoc(doc(db, "schedules", from));
+    if (!snap.exists()) {
+      showToast("Не найдено: " + from);
+      return;
+    }
+    setText(serialize(snap.data()));
+    showToast("Скопировано из " + from);
+  };
+
+  const clearAll = () => {
+    if (!confirm("Очистить расписание для текущего класса?")) return;
+    setText(serialize({}));
   };
 
   const showToast = (msg) => {
@@ -127,18 +147,34 @@ export default function Admin() {
 
       <div className="editor">
         <div>
-          <p style={{ color: "var(--text-dim)", fontSize: 13, marginBottom: 10 }}>
-            Формат: день, каждый урок с новой строки. Пустая строка между днями.
-          </p>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10, alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+            <p style={{ color: "var(--text-dim)", fontSize: 13 }}>
+              Редактируется: <strong style={{ color: "var(--accent)" }}>{grade} — группа {group}</strong>
+            </p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="secondary" style={{ width: "auto", fontSize: 12, padding: "6px 10px" }} onClick={copyFrom}>
+                Копировать из…
+              </button>
+              <button className="secondary" style={{ width: "auto", fontSize: 12, padding: "6px 10px" }} onClick={clearAll}>
+                Очистить
+              </button>
+            </div>
+          </div>
           <textarea rows="20" value={text} onChange={e => setText(e.target.value)} />
-          <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-            <button className="secondary" onClick={saveToFirestore} disabled={saving}>💾 Firestore</button>
-            <button className="secondary" onClick={saveToGithub} disabled={saving}>🐙 GitHub</button>
-            <button onClick={saveBoth} disabled={saving}>{saving ? "..." : "💾 Сохранить всё"}</button>
+          <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+            <button className="secondary" style={{ display: "flex", alignItems: "center", gap: 6, width: "auto" }} onClick={saveToFirestore} disabled={saving}>
+              <FirebaseIcon /> Firestore
+            </button>
+            <button className="secondary" style={{ display: "flex", alignItems: "center", gap: 6, width: "auto" }} onClick={saveToGithub} disabled={saving}>
+              <GithubIcon /> GitHub
+            </button>
+            <button style={{ display: "flex", alignItems: "center", gap: 6, width: "auto" }} onClick={saveBoth} disabled={saving}>
+              <SaveIcon /> {saving ? "Сохранение..." : "Сохранить всё"}
+            </button>
           </div>
         </div>
         <div className="preview">
-          <h3 style={{ marginBottom: 12, fontSize: 15, color: "var(--accent)" }}>Предпросмотр</h3>
+          <h3 style={{ marginBottom: 12, fontSize: 15, color: "var(--accent)" }}>Предпросмотр — {grade}/{group}</h3>
           {Object.entries(parse(text)).map(([day, lessons]) => (
             <div key={day} style={{ marginBottom: 12 }}>
               <strong>{day}</strong>

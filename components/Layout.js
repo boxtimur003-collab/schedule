@@ -1,5 +1,8 @@
 import Link from "next/link";
 import { useRouter } from "next/router";
+import ScheduleIcon from "./icons/ScheduleIcon";
+import AdminIcon from "./icons/AdminIcon";
+import LogoutIcon from "./icons/LogoutIcon";
 
 export default function Layout({ children, user }) {
   const router = useRouter();
@@ -17,14 +20,16 @@ export default function Layout({ children, user }) {
         {user && (
           <>
             <Link href="/schedule" className={router.pathname === "/schedule" ? "active" : ""}>
-              📖 Расписание
+              <ScheduleIcon /> <span>Расписание</span>
             </Link>
             {isAdmin && (
               <Link href="/admin" className={router.pathname === "/admin" ? "active" : ""}>
-                ⚙️ Админ-панель
+                <AdminIcon /> <span>Админ-панель</span>
               </Link>
             )}
-            <a onClick={logout} style={{ cursor: "pointer" }}>🚪 Выйти</a>
+            <a onClick={logout} style={{ cursor: "pointer" }}>
+              <LogoutIcon /> <span>Выйти</span>
+            </a>
           </>
         )}
       </aside>

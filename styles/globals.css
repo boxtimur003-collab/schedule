@@ -48,12 +48,15 @@ a:hover { text-decoration: underline; }
 }
 
 .sidebar a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 12px 20px;
   color: var(--text-dim);
-  display: block;
   border-left: 3px solid transparent;
   transition: 0.15s;
 }
+.sidebar a svg { flex-shrink: 0; }
 .sidebar a:hover, .sidebar a.active {
   background: var(--bg-3);
   color: var(--text);
@@ -116,9 +119,7 @@ a:hover { text-decoration: underline; }
   text-align: center;
 }
 
-.field {
-  margin-bottom: 16px;
-}
+.field { margin-bottom: 16px; }
 
 .field label {
   display: block;
@@ -225,7 +226,9 @@ button.secondary {
   cursor: pointer;
   font-size: 14px;
   color: var(--text-dim);
+  transition: 0.15s;
 }
+.tab:hover { border-color: var(--accent); }
 .tab.active {
   background: var(--accent);
   color: #000;
@@ -233,7 +236,7 @@ button.secondary {
   font-weight: 600;
 }
 
-/* Admin textarea */
+/* Admin editor */
 .editor {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -243,12 +246,11 @@ button.secondary {
   .editor { grid-template-columns: 1fr; }
   .sidebar { width: 70px; }
   .sidebar .logo { font-size: 0; padding: 0 0 20px; }
-  .sidebar a { padding: 12px; text-align: center; font-size: 0; }
-  .sidebar a::first-letter { font-size: 20px; }
+  .sidebar a { padding: 12px; justify-content: center; }
+  .sidebar a span { display: none; }
   .main { padding: 20px; }
 }
 
-/* Preview */
 .preview {
   background: var(--bg-2);
   border: 1px solid var(--border);
@@ -270,6 +272,7 @@ button.secondary {
   font-size: 14px;
   animation: slideIn 0.3s;
   z-index: 1000;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
 }
 @keyframes slideIn {
   from { transform: translateX(100px); opacity: 0; }
