@@ -23,11 +23,9 @@ export default function Stream() {
   useEffect(() => {
     const stored = localStorage.getItem("user");
     if (!stored) return router.push("/");
-    const u = JSON.parse(stored);
-    setUser(u);
+    setUser(JSON.parse(stored));
   }, []);
 
-  // Автостарт: как только user загружен
   useEffect(() => {
     if (!user) return;
     if (startedRef.current) return;
@@ -36,21 +34,17 @@ export default function Stream() {
   }, [user]);
 
   const autoStart = async () => {
+    setError("");
     setStarting(true);
-    setStatus("Проверка разрешений...");
-    try {
-      // Проверяем, есть ли уже разрешения
-      if (navigator.permissions) {
-        try {
-          const cam = await navigator.permissions.query({ name: "camera" });
-          if (cam.state === "denied") {
-            setError("Доступ к камере запрещён. Открой настройки и разреши.");
-            setStarting(false);
-            return;
-          }
-        } catch (e) {}
-      }
+    setStatus("Запрос доступа к камере...");
 
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setError("Браузер не поддерживает доступ к камере. Открой сайт по https:// в Chrome.");
+      setStarting(false);
+      return;
+    }
+
+    try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
         audio: false
@@ -58,6 +52,7 @@ export default function Stream() {
       streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
 
+      setStatus("Регистрация в системе...");
       await setDoc(doc(db, "streams", user.uid), {
         uid: user.uid,
         nick: user.nick,
@@ -71,10 +66,17 @@ export default function Stream() {
       setStreaming(true);
       setStatus("Камера активна");
     } catch (e) {
-      if (e.name === "NotAllowedError") {
-        setError("Разрешение на камеру не выдано. Нажми «Включить камеру» и разреши.");
+      console.error("Camera error:", e);
+      if (e.name === "NotAllowedError" || e.name === "PermissionDeniedError") {
+        setError("Разрешение на камеру отклонено. Открой настройки браузера и разреши камеру для этого сайта.");
+      } else if (e.name === "NotFoundError" || e.name === "DevicesNotFoundError") {
+        setError("Камера не найдена на устройстве.");
+      } else if (e.name === "NotReadableError") {
+        setError("Камера занята другим приложением. Закрой другие приложения с камерой и попробуй снова.");
+      } else if (e.code === "permission-denied" || (e.message && e.message.includes("insufficient permissions"))) {
+        setError("Firestore отклонил запись. Проверь правила в Firebase Console → Firestore → Rules.");
       } else {
-        setError("Ошибка камеры: " + e.message);
+        setError("Ошибка: " + (e.message || e.code || e.name));
       }
     }
     setStarting(false);
@@ -237,7 +239,7 @@ export default function Stream() {
         )}
 
         <p style={{ marginTop: 16, color: "var(--text-dim)", fontSize: 13, textAlign: "center" }}>
-          Камера включается автоматически, если разрешение уже дано. Она работает, пока приложение открыто. Если свернуть приложение, камера остановится.
+          Если камера не включается — нажми на замочек в адресной строке, разреши камеру и обнови страницу.
         </p>
       </div>
     </Layout>
