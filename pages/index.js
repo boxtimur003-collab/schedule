@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { auth, db, NICK_DOMAIN } from "../firebase";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { useRouter } from "next/router";
+import { seedDefaultClasses } from "../lib/classes";
 
 export default function Login() {
   const [nick, setNick] = useState("");
@@ -10,11 +11,15 @@ export default function Login() {
   const [error, setError] = useState("");
   const router = useRouter();
 
+  useEffect(() => {
+    // Однократно создаём стартовые классы, если их ещё нет
+    seedDefaultClasses().catch(() => {});
+  }, []);
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setError("");
     try {
-      // Подменяем ник на служебную почту
       const email = `${nick.toLowerCase()}@${NICK_DOMAIN}`;
       const cred = await signInWithEmailAndPassword(auth, email, password);
       const uDoc = await getDoc(doc(db, "users", cred.user.uid));

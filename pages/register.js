@@ -1,25 +1,48 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { auth, db, NICK_DOMAIN } from "../firebase";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { doc, setDoc } from "firebase/firestore";
 import { useRouter } from "next/router";
-
-const GRADES = ["10А", "10Б", "10В", "10Г"];
-const GROUPS = ["1", "2"];
+import { getAllClasses } from "../lib/classes";
 
 export default function Register() {
   const [nick, setNick] = useState("");
   const [password, setPassword] = useState("");
-  const [grade, setGrade] = useState("10А");
-  const [group, setGroup] = useState("1");
+  const [classes, setClasses] = useState([]);
+  const [grade, setGrade] = useState("");
+  const [group, setGroup] = useState("");
   const [error, setError] = useState("");
   const router = useRouter();
+
+  useEffect(() => {
+    loadClasses();
+  }, []);
+
+  const loadClasses = async () => {
+    try {
+      const list = await getAllClasses();
+      setClasses(list);
+      if (list.length > 0) {
+        setGrade(list[0].id);
+        const groups = list[0].groups || [];
+        setGroup(groups[0] || "1");
+      }
+    } catch (e) {
+      setError("Не удалось загрузить классы: " + e.message);
+    }
+  };
+
+  const currentGroups = classes.find(c => c.id === grade)?.groups || [];
 
   const handleRegister = async (e) => {
     e.preventDefault();
     setError("");
     if (password.length < 6) {
       setError("Пароль минимум 6 символов");
+      return;
+    }
+    if (!grade || !group) {
+      setError("Выберите класс и группу");
       return;
     }
     try {
@@ -33,6 +56,12 @@ export default function Register() {
       if (err.code === "auth/email-already-in-use") setError("Такой ник уже занят");
       else setError(err.message);
     }
+  };
+
+  const onGradeChange = (g) => {
+    setGrade(g);
+    const groups = classes.find(c => c.id === g)?.groups || [];
+    setGroup(groups[0] || "1");
   };
 
   return (
@@ -50,14 +79,14 @@ export default function Register() {
         </div>
         <div className="field">
           <label>Класс</label>
-          <select value={grade} onChange={e => setGrade(e.target.value)}>
-            {GRADES.map(g => <option key={g}>{g}</option>)}
+          <select value={grade} onChange={e => onGradeChange(e.target.value)}>
+            {classes.map(c => <option key={c.id} value={c.id}>{c.id}</option>)}
           </select>
         </div>
         <div className="field">
           <label>Группа</label>
           <select value={group} onChange={e => setGroup(e.target.value)}>
-            {GROUPS.map(g => <option key={g}>{g}</option>)}
+            {currentGroups.map(g => <option key={g} value={g}>Группа {g}</option>)}
           </select>
         </div>
         <button type="submit">Зарегистрироваться</button>

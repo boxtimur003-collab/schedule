@@ -1,12 +1,29 @@
 import Link from "next/link";
 import { useRouter } from "next/router";
+import { useEffect, useState } from "react";
 import ScheduleIcon from "./icons/ScheduleIcon";
 import AdminIcon from "./icons/AdminIcon";
 import LogoutIcon from "./icons/LogoutIcon";
+import SunIcon from "./icons/SunIcon";
+import MoonIcon from "./icons/MoonIcon";
 
 export default function Layout({ children, user }) {
   const router = useRouter();
   const isAdmin = user?.role === "admin";
+  const [theme, setTheme] = useState("dark");
+
+  useEffect(() => {
+    const saved = localStorage.getItem("theme") || "dark";
+    setTheme(saved);
+    document.documentElement.setAttribute("data-theme", saved);
+  }, []);
+
+  const toggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    localStorage.setItem("theme", next);
+    document.documentElement.setAttribute("data-theme", next);
+  };
 
   const logout = () => {
     localStorage.removeItem("user");
@@ -27,11 +44,15 @@ export default function Layout({ children, user }) {
                 <AdminIcon /> <span>Админ-панель</span>
               </Link>
             )}
-            <a onClick={logout} style={{ cursor: "pointer" }}>
+            <a onClick={logout}>
               <LogoutIcon /> <span>Выйти</span>
             </a>
           </>
         )}
+        <div className="theme-toggle" onClick={toggleTheme}>
+          {theme === "dark" ? <SunIcon /> : <MoonIcon />}
+          <span>{theme === "dark" ? "Светлая тема" : "Тёмная тема"}</span>
+        </div>
       </aside>
       <main className="main">{children}</main>
     </div>

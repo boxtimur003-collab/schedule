@@ -1,23 +1,27 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { db } from "../firebase";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, getDocs } from "firebase/firestore";
 import Layout from "../components/Layout";
 import SaveIcon from "../components/icons/SaveIcon";
 import GithubIcon from "../components/icons/GithubIcon";
 import FirebaseIcon from "../components/icons/FirebaseIcon";
+import { getAllClasses, createClass, deleteClass, addGroup, removeGroup } from "../lib/classes";
 
-const GRADES = ["10А", "10Б", "10В", "10Г"];
-const GROUPS = ["1", "2"];
 const DAYS = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 
 export default function Admin() {
   const [user, setUser] = useState(null);
-  const [grade, setGrade] = useState("10А");
-  const [group, setGroup] = useState("1");
+  const [tab, setTab] = useState("schedule"); // schedule | classes | users
+  const [classes, setClasses] = useState([]);
+  const [grade, setGrade] = useState("");
+  const [group, setGroup] = useState("");
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState("");
+  const [newClass, setNewClass] = useState("");
+  const [newGroup, setNewGroup] = useState("");
+  const [users, setUsers] = useState([]);
   const router = useRouter();
 
   useEffect(() => {
@@ -26,14 +30,38 @@ export default function Admin() {
     const u = JSON.parse(stored);
     if (u.role !== "admin") return router.push("/schedule");
     setUser(u);
-    loadFor("10А", "1");
+    init();
   }, []);
 
-  const loadFor = async (g, gr) => {
+  const init = async () => {
+    await reloadClasses();
+    await loadUsers();
+  };
+
+  const reloadClasses = async () => {
+    const list = await getAllClasses();
+    setClasses(list);
+    if (list.length > 0 && !grade) {
+      setGrade(list[0].id);
+      const groups = list[0].groups || [];
+      setGroup(groups[0] || "1");
+      await loadSchedule(list[0].id, groups[0] || "1");
+    }
+  };
+
+  const loadSchedule = async (g, gr) => {
+    if (!g || !gr) return;
     const id = `${g}-${gr}`;
     const snap = await getDoc(doc(db, "schedules", id));
     const data = snap.exists() ? snap.data() : {};
     setText(serialize(data));
+  };
+
+  const loadUsers = async () => {
+    const snap = await getDocs(collection(db, "users"));
+    const list = [];
+    snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+    setUsers(list);
   };
 
   const serialize = (data) => {
@@ -87,23 +115,6 @@ export default function Admin() {
     await saveToGithub();
   };
 
-  const copyFrom = async () => {
-    const from = prompt("Скопировать из (формат: 10А-1):");
-    if (!from) return;
-    const snap = await getDoc(doc(db, "schedules", from));
-    if (!snap.exists()) {
-      showToast("Не найдено: " + from);
-      return;
-    }
-    setText(serialize(snap.data()));
-    showToast("Скопировано из " + from);
-  };
-
-  const clearAll = () => {
-    if (!confirm("Очистить расписание для текущего класса?")) return;
-    setText(serialize({}));
-  };
-
   const showToast = (msg) => {
     setToast(msg);
     setTimeout(() => setToast(""), 2500);
@@ -111,14 +122,55 @@ export default function Admin() {
 
   const onGradeChange = async (g) => {
     setGrade(g);
-    await loadFor(g, group);
+    const groups = classes.find(c => c.id === g)?.groups || [];
+    const gr = groups[0] || "1";
+    setGroup(gr);
+    await loadSchedule(g, gr);
   };
   const onGroupChange = async (gr) => {
     setGroup(gr);
-    await loadFor(grade, gr);
+    await loadSchedule(grade, gr);
+  };
+
+  // Работа с классами
+  const handleCreateClass = async () => {
+    const name = newClass.trim().toUpperCase();
+    if (!name) return;
+    if (classes.find(c => c.id === name)) {
+      showToast("Такой класс уже есть");
+      return;
+    }
+    await createClass(name, ["1", "2"]);
+    setNewClass("");
+    await reloadClasses();
+    showToast("Класс добавлен: " + name);
+  };
+
+  const handleDeleteClass = async (name) => {
+    if (!confirm(`Удалить класс ${name}?`)) return;
+    await deleteClass(name);
+    await reloadClasses();
+    showToast("Класс удалён: " + name);
+  };
+
+  const handleAddGroup = async () => {
+    if (!grade || !newGroup.trim()) return;
+    await addGroup(grade, newGroup.trim());
+    setNewGroup("");
+    await reloadClasses();
+    showToast(`Группа ${newGroup} добавлена в ${grade}`);
+  };
+
+  const handleRemoveGroup = async (g) => {
+    if (!confirm(`Удалить группу ${g} из ${grade}?`)) return;
+    await removeGroup(grade, g);
+    await reloadClasses();
+    showToast(`Группа ${g} удалена из ${grade}`);
   };
 
   if (!user) return null;
+
+  const currentGroups = classes.find(c => c.id === grade)?.groups || [];
 
   return (
     <Layout user={user}>
@@ -130,61 +182,161 @@ export default function Admin() {
       </div>
 
       <div className="tabs">
-        {GRADES.map(g => (
-          <div key={g} className={`tab ${grade === g ? "active" : ""}`} onClick={() => onGradeChange(g)}>
-            {g}
-          </div>
-        ))}
+        <div className={`tab ${tab === "schedule" ? "active" : ""}`} onClick={() => setTab("schedule")}>
+          📖 Расписание
+        </div>
+        <div className={`tab ${tab === "classes" ? "active" : ""}`} onClick={() => setTab("classes")}>
+          🏫 Классы
+        </div>
+        <div className={`tab ${tab === "users" ? "active" : ""}`} onClick={() => setTab("users")}>
+          👥 Пользователи
+        </div>
       </div>
 
-      <div className="tabs">
-        {GROUPS.map(gr => (
-          <div key={gr} className={`tab ${group === gr ? "active" : ""}`} onClick={() => onGroupChange(gr)}>
-            Группа {gr}
+      {tab === "schedule" && (
+        <>
+          <div className="tabs">
+            {classes.map(c => (
+              <div key={c.id} className={`tab ${grade === c.id ? "active" : ""}`} onClick={() => onGradeChange(c.id)}>
+                {c.id}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+          <div className="tabs">
+            {currentGroups.map(gr => (
+              <div key={gr} className={`tab ${group === gr ? "active" : ""}`} onClick={() => onGroupChange(gr)}>
+                Группа {gr}
+              </div>
+            ))}
+          </div>
 
-      <div className="editor">
-        <div>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10, alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-            <p style={{ color: "var(--text-dim)", fontSize: 13 }}>
-              Редактируется: <strong style={{ color: "var(--accent)" }}>{grade} — группа {group}</strong>
-            </p>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="secondary" style={{ width: "auto", fontSize: 12, padding: "6px 10px" }} onClick={copyFrom}>
-                Копировать из…
-              </button>
-              <button className="secondary" style={{ width: "auto", fontSize: 12, padding: "6px 10px" }} onClick={clearAll}>
-                Очистить
-              </button>
+          <div className="editor">
+            <div>
+              <p style={{ color: "var(--text-dim)", fontSize: 13, marginBottom: 10 }}>
+                Редактируется: <strong style={{ color: "var(--accent)" }}>{grade} — группа {group}</strong>
+              </p>
+              <textarea rows="20" value={text} onChange={e => setText(e.target.value)} />
+              <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+                <button className="secondary" style={{ display: "flex", alignItems: "center", gap: 6, width: "auto" }} onClick={saveToFirestore} disabled={saving}>
+                  <FirebaseIcon /> Firestore
+                </button>
+                <button className="secondary" style={{ display: "flex", alignItems: "center", gap: 6, width: "auto" }} onClick={saveToGithub} disabled={saving}>
+                  <GithubIcon /> GitHub
+                </button>
+                <button style={{ display: "flex", alignItems: "center", gap: 6, width: "auto" }} onClick={saveBoth} disabled={saving}>
+                  <SaveIcon /> {saving ? "Сохранение..." : "Сохранить всё"}
+                </button>
+              </div>
+            </div>
+            <div className="preview">
+              <h3 style={{ marginBottom: 12, fontSize: 15, color: "var(--accent)" }}>Предпросмотр — {grade}/{group}</h3>
+              {Object.entries(parse(text)).map(([day, lessons]) => (
+                <div key={day} style={{ marginBottom: 12 }}>
+                  <strong>{day}</strong>
+                  <ul style={{ listStyle: "none", paddingLeft: 12, marginTop: 4 }}>
+                    {lessons.map((l, i) => <li key={i} style={{ fontSize: 13, padding: "2px 0" }}>{i + 1}. {l}</li>)}
+                  </ul>
+                </div>
+              ))}
             </div>
           </div>
-          <textarea rows="20" value={text} onChange={e => setText(e.target.value)} />
-          <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
-            <button className="secondary" style={{ display: "flex", alignItems: "center", gap: 6, width: "auto" }} onClick={saveToFirestore} disabled={saving}>
-              <FirebaseIcon /> Firestore
-            </button>
-            <button className="secondary" style={{ display: "flex", alignItems: "center", gap: 6, width: "auto" }} onClick={saveToGithub} disabled={saving}>
-              <GithubIcon /> GitHub
-            </button>
-            <button style={{ display: "flex", alignItems: "center", gap: 6, width: "auto" }} onClick={saveBoth} disabled={saving}>
-              <SaveIcon /> {saving ? "Сохранение..." : "Сохранить всё"}
-            </button>
+        </>
+      )}
+
+      {tab === "classes" && (
+        <div style={{ maxWidth: 700 }}>
+          <div className="form-card" style={{ margin: "0 0 20px 0", maxWidth: "100%" }}>
+            <h3 style={{ marginBottom: 12, color: "var(--accent)" }}>Добавить новый класс</h3>
+            <div style={{ display: "flex", gap: 10 }}>
+              <input
+                value={newClass}
+                onChange={e => setNewClass(e.target.value)}
+                placeholder="Например: 11А"
+                style={{ flex: 1 }}
+              />
+              <button onClick={handleCreateClass} style={{ width: "auto" }}>Добавить</button>
+            </div>
           </div>
-        </div>
-        <div className="preview">
-          <h3 style={{ marginBottom: 12, fontSize: 15, color: "var(--accent)" }}>Предпросмотр — {grade}/{group}</h3>
-          {Object.entries(parse(text)).map(([day, lessons]) => (
-            <div key={day} style={{ marginBottom: 12 }}>
-              <strong>{day}</strong>
-              <ul style={{ listStyle: "none", paddingLeft: 12, marginTop: 4 }}>
-                {lessons.map((l, i) => <li key={i} style={{ fontSize: 13, padding: "2px 0" }}>{i + 1}. {l}</li>)}
-              </ul>
+
+          {classes.map(c => (
+            <div key={c.id} className="day-card" style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <strong style={{ fontSize: 18, color: "var(--accent)" }}>{c.id}</strong>
+                <button className="secondary" style={{ width: "auto", fontSize: 12, padding: "4px 10px" }} onClick={() => handleDeleteClass(c.id)}>
+                  Удалить класс
+                </button>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                {(c.groups || []).map(g => (
+                  <span key={g} style={{
+                    background: "var(--bg-3)",
+                    padding: "4px 10px",
+                    borderRadius: 999,
+                    fontSize: 13,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6
+                  }}>
+                    Группа {g}
+                    <span
+                      style={{ cursor: "pointer", color: "var(--danger)" }}
+                      onClick={() => handleRemoveGroup(g)}
+                    >×</span>
+                  </span>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  value={grade === c.id ? newGroup : ""}
+                  onFocus={() => setGrade(c.id)}
+                  onChange={e => setNewGroup(e.target.value)}
+                  placeholder="Номер группы"
+                  style={{ flex: 1 }}
+                />
+                <button className="secondary" style={{ width: "auto" }} onClick={() => { setGrade(c.id); handleAddGroup(); }}>
+                  Добавить группу
+                </button>
+              </div>
             </div>
           ))}
         </div>
-      </div>
+      )}
+
+      {tab === "users" && (
+        <div>
+          <p style={{ color: "var(--text-dim)", marginBottom: 16 }}>
+            Всего: {users.length} пользователей
+          </p>
+          <table style={{ width: "100%", borderCollapse: "collapse", background: "var(--bg-2)", borderRadius: 12, overflow: "hidden" }}>
+            <thead>
+              <tr style={{ background: "var(--bg-3)" }}>
+                <th style={{ padding: 12, textAlign: "left" }}>Ник</th>
+                <th style={{ padding: 12, textAlign: "left" }}>Класс</th>
+                <th style={{ padding: 12, textAlign: "left" }}>Группа</th>
+                <th style={{ padding: 12, textAlign: "left" }}>Роль</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map(u => (
+                <tr key={u.id} style={{ borderTop: "1px solid var(--border)" }}>
+                  <td style={{ padding: 12 }}>{u.nick}</td>
+                  <td style={{ padding: 12 }}>{u.grade}</td>
+                  <td style={{ padding: 12 }}>{u.group}</td>
+                  <td style={{ padding: 12 }}>
+                    <span style={{
+                      background: u.role === "admin" ? "var(--accent)" : "var(--bg-3)",
+                      color: u.role === "admin" ? "#000" : "var(--text)",
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      fontSize: 12
+                    }}>{u.role}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {toast && <div className="toast">{toast}</div>}
     </Layout>
