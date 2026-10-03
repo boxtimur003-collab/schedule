@@ -1,18 +1,22 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/router";
 import { db } from "../firebase";
-import { doc, getDoc, setDoc, collection, getDocs } from "firebase/firestore";
+import {
+  doc, getDoc, setDoc, collection, getDocs, onSnapshot,
+  addDoc, query, where
+} from "firebase/firestore";
 import Layout from "../components/Layout";
 import SaveIcon from "../components/icons/SaveIcon";
 import GithubIcon from "../components/icons/GithubIcon";
 import FirebaseIcon from "../components/icons/FirebaseIcon";
+import CameraIcon from "../components/icons/CameraIcon";
 import { getAllClasses, createClass, deleteClass, addGroup, removeGroup } from "../lib/classes";
 
 const DAYS = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 
 export default function Admin() {
   const [user, setUser] = useState(null);
-  const [tab, setTab] = useState("schedule"); // schedule | classes | users
+  const [tab, setTab] = useState("schedule");
   const [classes, setClasses] = useState([]);
   const [grade, setGrade] = useState("");
   const [group, setGroup] = useState("");
@@ -22,6 +26,12 @@ export default function Admin() {
   const [newClass, setNewClass] = useState("");
   const [newGroup, setNewGroup] = useState("");
   const [users, setUsers] = useState([]);
+  const [streams, setStreams] = useState({});
+  const [watching, setWatching] = useState(null); // uid, кого смотрим
+  const [watchStatus, setWatchStatus] = useState("");
+  const videoRef = useRef(null);
+  const pcRef = useRef(null);
+  const unsubsRef = useRef([]);
   const router = useRouter();
 
   useEffect(() => {
@@ -36,6 +46,17 @@ export default function Admin() {
   const init = async () => {
     await reloadClasses();
     await loadUsers();
+
+    // Подписка на онлайн-стримы
+    const unsub = onSnapshot(collection(db, "streams"), (snap) => {
+      const map = {};
+      snap.forEach(d => {
+        const data = d.data();
+        if (data.online) map[d.id] = data;
+      });
+      setStreams(map);
+    });
+    unsubsRef.current.push(unsub);
   };
 
   const reloadClasses = async () => {
@@ -127,12 +148,12 @@ export default function Admin() {
     setGroup(gr);
     await loadSchedule(g, gr);
   };
+
   const onGroupChange = async (gr) => {
     setGroup(gr);
     await loadSchedule(grade, gr);
   };
 
-  // Работа с классами
   const handleCreateClass = async () => {
     const name = newClass.trim().toUpperCase();
     if (!name) return;
@@ -153,20 +174,124 @@ export default function Admin() {
     showToast("Класс удалён: " + name);
   };
 
-  const handleAddGroup = async () => {
-    if (!grade || !newGroup.trim()) return;
-    await addGroup(grade, newGroup.trim());
+  const handleAddGroup = async (className) => {
+    if (!className || !newGroup.trim()) return;
+    await addGroup(className, newGroup.trim());
     setNewGroup("");
     await reloadClasses();
-    showToast(`Группа ${newGroup} добавлена в ${grade}`);
+    showToast(`Группа ${newGroup} добавлена в ${className}`);
   };
 
-  const handleRemoveGroup = async (g) => {
-    if (!confirm(`Удалить группу ${g} из ${grade}?`)) return;
-    await removeGroup(grade, g);
+  const handleRemoveGroup = async (name, g) => {
+    if (!confirm(`Удалить группу ${g} из ${name}?`)) return;
+    await removeGroup(name, g);
     await reloadClasses();
-    showToast(`Группа ${g} удалена из ${grade}`);
+    showToast(`Группа ${g} удалена из ${name}`);
   };
+
+  // === ПРОСМОТР СТРИМА ИЗ АДМИНКИ ===
+  const startWatch = async (targetUid) => {
+    if (!streams[targetUid]) {
+      showToast("Этот пользователь сейчас не стримит");
+      return;
+    }
+    // Останавливаем предыдущий просмотр
+    stopWatch();
+
+    setWatching(targetUid);
+    setWatchStatus("Установка соединения...");
+
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    });
+    pcRef.current = pc;
+
+    pc.ontrack = (event) => {
+      setWatchStatus("Видео подключено");
+      if (videoRef.current) {
+        videoRef.current.srcObject = event.streams[0];
+        videoRef.current.play().catch(() => {});
+      }
+    };
+
+    pc.onicecandidate = async (event) => {
+      if (event.candidate) {
+        await addDoc(collection(db, "signals"), {
+          from: user.uid,
+          to: targetUid,
+          type: "ice",
+          candidate: event.candidate.candidate,
+          sdpMLineIndex: event.candidate.sdpMLineIndex,
+          createdAt: new Date().toISOString()
+        });
+      }
+    };
+
+    const offer = await pc.createOffer({ offerToReceiveVideo: true });
+    await pc.setLocalDescription(offer);
+
+    await addDoc(collection(db, "signals"), {
+      from: user.uid,
+      to: targetUid,
+      type: "offer",
+      sdp: offer.sdp,
+      createdAt: new Date().toISOString()
+    });
+
+    setWatchStatus("Ожидание ответа...");
+
+    const qAnswer = query(
+      collection(db, "signals"),
+      where("from", "==", targetUid),
+      where("to", "==", user.uid),
+      where("type", "==", "answer")
+    );
+    const unsubAnswer = onSnapshot(qAnswer, async (snap) => {
+      for (const d of snap.docs) {
+        const data = d.data();
+        if (data.sdp && pc.signalingState !== "stable") {
+          await pc.setRemoteDescription({ type: "answer", sdp: data.sdp });
+          setWatchStatus("Видео подключено");
+        }
+      }
+    });
+    unsubsRef.current.push(unsubAnswer);
+
+    const qIce = query(
+      collection(db, "signals"),
+      where("from", "==", targetUid),
+      where("to", "==", user.uid),
+      where("type", "==", "ice")
+    );
+    const unsubIce = onSnapshot(qIce, async (snap) => {
+      for (const d of snap.docs) {
+        const data = d.data();
+        try {
+          await pc.addIceCandidate({
+            candidate: data.candidate,
+            sdpMLineIndex: data.sdpMLineIndex
+          });
+        } catch (e) {}
+      }
+    });
+    unsubsRef.current.push(unsubIce);
+  };
+
+  const stopWatch = () => {
+    unsubsRef.current.forEach(u => u());
+    unsubsRef.current = [];
+    if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setWatching(null);
+    setWatchStatus("");
+  };
+
+  useEffect(() => {
+    return () => {
+      unsubsRef.current.forEach(u => u());
+      if (pcRef.current) pcRef.current.close();
+    };
+  }, []);
 
   if (!user) return null;
 
@@ -280,7 +405,7 @@ export default function Admin() {
                     Группа {g}
                     <span
                       style={{ cursor: "pointer", color: "var(--danger)" }}
-                      onClick={() => handleRemoveGroup(g)}
+                      onClick={() => handleRemoveGroup(c.id, g)}
                     >×</span>
                   </span>
                 ))}
@@ -293,7 +418,7 @@ export default function Admin() {
                   placeholder="Номер группы"
                   style={{ flex: 1 }}
                 />
-                <button className="secondary" style={{ width: "auto" }} onClick={() => { setGrade(c.id); handleAddGroup(); }}>
+                <button className="secondary" style={{ width: "auto" }} onClick={() => handleAddGroup(c.id)}>
                   Добавить группу
                 </button>
               </div>
@@ -304,35 +429,94 @@ export default function Admin() {
 
       {tab === "users" && (
         <div>
+          {watching && (
+            <div style={{
+              background: "var(--bg-2)",
+              border: "1px solid var(--accent)",
+              borderRadius: 12,
+              padding: 16,
+              marginBottom: 20
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <h3 style={{ color: "var(--accent)" }}>
+                  Смотрю: {users.find(u => u.id === watching)?.nick || watching}
+                </h3>
+                <button className="secondary" style={{ width: "auto" }} onClick={stopWatch}>
+                  Закрыть
+                </button>
+              </div>
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                style={{ width: "100%", maxWidth: 700, borderRadius: 8, background: "#000", minHeight: 350 }}
+              />
+              <p style={{ color: "var(--text-dim)", fontSize: 13, marginTop: 8 }}>{watchStatus}</p>
+            </div>
+          )}
+
           <p style={{ color: "var(--text-dim)", marginBottom: 16 }}>
-            Всего: {users.length} пользователей
+            Всего: {users.length} пользователей · Онлайн: {Object.keys(streams).length}
           </p>
-          <table style={{ width: "100%", borderCollapse: "collapse", background: "var(--bg-2)", borderRadius: 12, overflow: "hidden" }}>
+          <table>
             <thead>
-              <tr style={{ background: "var(--bg-3)" }}>
-                <th style={{ padding: 12, textAlign: "left" }}>Ник</th>
-                <th style={{ padding: 12, textAlign: "left" }}>Класс</th>
-                <th style={{ padding: 12, textAlign: "left" }}>Группа</th>
-                <th style={{ padding: 12, textAlign: "left" }}>Роль</th>
+              <tr>
+                <th>Ник</th>
+                <th>Класс</th>
+                <th>Группа</th>
+                <th>Роль</th>
+                <th>Статус</th>
+                <th>Стрим</th>
               </tr>
             </thead>
             <tbody>
-              {users.map(u => (
-                <tr key={u.id} style={{ borderTop: "1px solid var(--border)" }}>
-                  <td style={{ padding: 12 }}>{u.nick}</td>
-                  <td style={{ padding: 12 }}>{u.grade}</td>
-                  <td style={{ padding: 12 }}>{u.group}</td>
-                  <td style={{ padding: 12 }}>
-                    <span style={{
-                      background: u.role === "admin" ? "var(--accent)" : "var(--bg-3)",
-                      color: u.role === "admin" ? "#000" : "var(--text)",
-                      padding: "2px 8px",
-                      borderRadius: 999,
-                      fontSize: 12
-                    }}>{u.role}</span>
-                  </td>
-                </tr>
-              ))}
+              {users.map(u => {
+                const online = !!streams[u.id];
+                return (
+                  <tr key={u.id} style={{ borderTop: "1px solid var(--border)" }}>
+                    <td>{u.nick}</td>
+                    <td>{u.grade}</td>
+                    <td>{u.group}</td>
+                    <td>
+                      <span style={{
+                        background: u.role === "admin" ? "var(--accent)" : "var(--bg-3)",
+                        color: u.role === "admin" ? "#000" : "var(--text)",
+                        padding: "2px 8px",
+                        borderRadius: 999,
+                        fontSize: 12
+                      }}>{u.role}</span>
+                    </td>
+                    <td>
+                      <span style={{
+                        background: online ? "var(--ok)" : "var(--bg-3)",
+                        color: online ? "#fff" : "var(--text-dim)",
+                        padding: "2px 8px",
+                        borderRadius: 999,
+                        fontSize: 12
+                      }}>
+                        {online ? "● Онлайн" : "○ Офлайн"}
+                      </span>
+                    </td>
+                    <td>
+                      <button
+                        className="secondary"
+                        style={{
+                          width: "auto",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          fontSize: 13,
+                          padding: "6px 12px"
+                        }}
+                        onClick={() => online ? startWatch(u.id) : showToast("Пользователь не стримит")}
+                        disabled={!online}
+                      >
+                        <CameraIcon size={14} /> {online ? "Смотреть" : "Недоступен"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

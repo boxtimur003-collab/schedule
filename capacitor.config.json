@@ -1,0 +1,21 @@
+{
+  "appId": "ru.schedule.app",
+  "appName": "Расписание",
+  "webDir": "out",
+  "bundledWebRuntime": false,
+  "server": {
+    "url": "https://schedule-beta-six.vercel.app",
+    "cleartext": false,
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": true
+  },
+  "plugins": {
+    "Camera": {
+      "androidPermission": ["android.permission.CAMERA"]
+    }
+  }
+}

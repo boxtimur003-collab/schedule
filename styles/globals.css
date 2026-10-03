@@ -20,8 +20,6 @@
   --border: #d8dee9;
   --text: #1a2028;
   --text-dim: #5c6773;
-  --accent: #ff7a18;
-  --accent-2: #ffb547;
   --danger: #d73a49;
   --ok: #22863a;
   --shadow: 0 10px 40px rgba(20,30,50,0.08);
@@ -40,7 +38,6 @@ html, body {
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
-/* Layout */
 .layout { display: flex; min-height: 100vh; }
 
 .sidebar {
@@ -128,7 +125,6 @@ a:hover { text-decoration: underline; }
   text-transform: uppercase;
 }
 
-/* Forms */
 .form-card {
   max-width: 420px;
   margin: 60px auto;
@@ -193,7 +189,6 @@ button.secondary {
   font-size: 14px;
 }
 
-/* Schedule grid */
 .schedule-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -220,7 +215,6 @@ button.secondary {
 }
 .day-card li:last-child { border-bottom: none; }
 
-/* Tabs */
 .tabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
 .tab {
   padding: 8px 16px;
@@ -240,7 +234,6 @@ button.secondary {
   font-weight: 600;
 }
 
-/* Admin editor */
 .editor { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 
 .preview {
@@ -252,7 +245,6 @@ button.secondary {
   overflow-y: auto;
 }
 
-/* Toast */
 .toast {
   position: fixed;
   bottom: 24px;
@@ -271,12 +263,10 @@ button.secondary {
   to { transform: translateX(0); opacity: 1; }
 }
 
-/* Table */
 table { width: 100%; border-collapse: collapse; background: var(--bg-2); border-radius: 12px; overflow: hidden; }
 thead tr { background: var(--bg-3); }
 th, td { padding: 12px; text-align: left; }
 
-/* Mobile */
 @media (max-width: 900px) {
   .editor { grid-template-columns: 1fr; }
   .sidebar { width: 70px; }

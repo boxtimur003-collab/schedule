@@ -1,6 +1,19 @@
 node_modules/
 .next/
+out/
 .env.local
 .env
 *.log
 .DS_Store
+
+# Android / Capacitor
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/captures/
+android/app/release/
+*.apk
+*.aab
+*.keystore

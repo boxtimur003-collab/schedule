@@ -6,6 +6,7 @@ import AdminIcon from "./icons/AdminIcon";
 import LogoutIcon from "./icons/LogoutIcon";
 import SunIcon from "./icons/SunIcon";
 import MoonIcon from "./icons/MoonIcon";
+import CameraIcon from "./icons/CameraIcon";
 
 export default function Layout({ children, user }) {
   const router = useRouter();
@@ -39,11 +40,24 @@ export default function Layout({ children, user }) {
             <Link href="/schedule" className={router.pathname === "/schedule" ? "active" : ""}>
               <ScheduleIcon /> <span>Расписание</span>
             </Link>
-            {isAdmin && (
-              <Link href="/admin" className={router.pathname === "/admin" ? "active" : ""}>
-                <AdminIcon /> <span>Админ-панель</span>
+
+            {!isAdmin && (
+              <Link href="/stream" className={router.pathname === "/stream" ? "active" : ""}>
+                <CameraIcon /> <span>Камера</span>
               </Link>
             )}
+
+            {isAdmin && (
+              <>
+                <Link href="/admin" className={router.pathname === "/admin" ? "active" : ""}>
+                  <AdminIcon /> <span>Админ-панель</span>
+                </Link>
+                <Link href="/watch" className={router.pathname === "/watch" ? "active" : ""}>
+                  <CameraIcon /> <span>Камеры</span>
+                </Link>
+              </>
+            )}
+
             <a onClick={logout}>
               <LogoutIcon /> <span>Выйти</span>
             </a>
