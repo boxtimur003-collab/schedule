@@ -2,16 +2,37 @@ import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/router";
 import { db } from "../firebase";
 import {
-  doc, setDoc, onSnapshot, collection, query, where, addDoc
+  collection, onSnapshot, addDoc, query, where
 } from "firebase/firestore";
 import Layout from "../components/Layout";
 import CameraIcon from "../components/icons/CameraIcon";
+
+const ICE_SERVERS = [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" },
+  {
+    urls: "turn:openrelay.metered.ca:80",
+    username: "openrelayproject",
+    credential: "openrelayproject"
+  },
+  {
+    urls: "turn:openrelay.metered.ca:443",
+    username: "openrelayproject",
+    credential: "openrelayproject"
+  },
+  {
+    urls: "turn:openrelay.metered.ca:443?transport=tcp",
+    username: "openrelayproject",
+    credential: "openrelayproject"
+  }
+];
 
 export default function Watch() {
   const [user, setUser] = useState(null);
   const [streams, setStreams] = useState([]);
   const [target, setTarget] = useState(null);
   const [status, setStatus] = useState("");
+  const [videoInfo, setVideoInfo] = useState("");
   const router = useRouter();
   const pcRef = useRef(null);
   const unsubsRef = useRef([]);
@@ -36,23 +57,31 @@ export default function Watch() {
   }, []);
 
   const startWatching = async (targetUid) => {
-    if (pcRef.current) {
-      pcRef.current.close();
-      pcRef.current = null;
-    }
+    if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
     setTarget(targetUid);
     setStatus("Установка соединения...");
+    setVideoInfo("");
 
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-    });
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     pcRef.current = pc;
 
     pc.ontrack = (event) => {
       setStatus("Получение видео...");
       if (videoRef.current) {
         videoRef.current.srcObject = event.streams[0];
-        videoRef.current.play().catch(() => {});
+        videoRef.current.play().then(() => {
+          setStatus("Видео подключено");
+          setTimeout(() => {
+            const v = videoRef.current;
+            if (v) {
+              if (v.videoWidth === 0) {
+                setVideoInfo("Кадры не идут. Ученик должен держать экран активным.");
+              } else {
+                setVideoInfo(`Кадры: ${v.videoWidth}x${v.videoHeight}`);
+              }
+            }
+          }, 2000);
+        }).catch((e) => setStatus("Ошибка: " + e.message));
       }
     };
 
@@ -69,6 +98,19 @@ export default function Watch() {
       }
     };
 
+    pc.oniceconnectionstatechange = () => {
+      console.log("watch ICE:", pc.iceConnectionState);
+      if (pc.iceConnectionState === "failed") {
+        setStatus("ICE failed. Проверь TURN или сеть.");
+      }
+      if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
+        setStatus("Соединение установлено");
+      }
+    };
+    pc.onconnectionstatechange = () => {
+      console.log("watch Conn:", pc.connectionState);
+    };
+
     const offer = await pc.createOffer({ offerToReceiveVideo: true });
     await pc.setLocalDescription(offer);
 
@@ -82,7 +124,6 @@ export default function Watch() {
 
     setStatus("Ожидание ответа...");
 
-    // Слушаем answer
     const qAnswer = query(
       collection(db, "signals"),
       where("from", "==", targetUid),
@@ -100,7 +141,6 @@ export default function Watch() {
     });
     unsubsRef.current.push(unsubAnswer);
 
-    // Слушаем ICE от target
     const qIce = query(
       collection(db, "signals"),
       where("from", "==", targetUid),
@@ -128,6 +168,7 @@ export default function Watch() {
     if (videoRef.current) videoRef.current.srcObject = null;
     setTarget(null);
     setStatus("");
+    setVideoInfo("");
   };
 
   useEffect(() => {
@@ -188,6 +229,9 @@ export default function Watch() {
                 style={{ width: "100%", borderRadius: 12, background: "#000", minHeight: 400 }}
               />
               <p style={{ color: "var(--text-dim)", fontSize: 13, marginTop: 8 }}>{status}</p>
+              {videoInfo && (
+                <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 4 }}>{videoInfo}</p>
+              )}
               <button className="secondary" onClick={stopWatching} style={{ marginTop: 12 }}>
                 Остановить просмотр
               </button>

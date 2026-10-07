@@ -7,6 +7,27 @@ import {
 import Layout from "../components/Layout";
 import CameraIcon from "../components/icons/CameraIcon";
 
+// ICE-серверы: STUN + TURN (публичный OpenRelay для тестов)
+const ICE_SERVERS = [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" },
+  {
+    urls: "turn:openrelay.metered.ca:80",
+    username: "openrelayproject",
+    credential: "openrelayproject"
+  },
+  {
+    urls: "turn:openrelay.metered.ca:443",
+    username: "openrelayproject",
+    credential: "openrelayproject"
+  },
+  {
+    urls: "turn:openrelay.metered.ca:443?transport=tcp",
+    username: "openrelayproject",
+    credential: "openrelayproject"
+  }
+];
+
 export default function Stream() {
   const [user, setUser] = useState(null);
   const [streaming, setStreaming] = useState(false);
@@ -36,23 +57,26 @@ export default function Stream() {
   const autoStart = async () => {
     setError("");
     setStarting(true);
-    setStatus("Запрос доступа к камере...");
+    setStatus("Запрос камеры...");
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setError("Браузер не поддерживает доступ к камере. Открой сайт по https:// в Chrome.");
+      setError("Браузер не поддерживает камеру.");
       setStarting(false);
       return;
     }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24 } },
         audio: false
       });
+      stream.getTracks().forEach(t => { t.enabled = true; });
       streamRef.current = stream;
-      if (videoRef.current) videoRef.current.srcObject = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => {});
+      }
 
-      setStatus("Регистрация в системе...");
       await setDoc(doc(db, "streams", user.uid), {
         uid: user.uid,
         nick: user.nick,
@@ -64,19 +88,16 @@ export default function Stream() {
 
       listenForOffers();
       setStreaming(true);
-      setStatus("Камера активна");
+      setStatus("Камера активна, ожидание администратора");
     } catch (e) {
-      console.error("Camera error:", e);
-      if (e.name === "NotAllowedError" || e.name === "PermissionDeniedError") {
-        setError("Разрешение на камеру отклонено. Открой настройки браузера и разреши камеру для этого сайта.");
-      } else if (e.name === "NotFoundError" || e.name === "DevicesNotFoundError") {
-        setError("Камера не найдена на устройстве.");
+      if (e.name === "NotAllowedError") {
+        setError("Разрешение на камеру отклонено. Разреши в настройках браузера.");
+      } else if (e.name === "NotFoundError") {
+        setError("Камера не найдена.");
       } else if (e.name === "NotReadableError") {
-        setError("Камера занята другим приложением. Закрой другие приложения с камерой и попробуй снова.");
-      } else if (e.code === "permission-denied" || (e.message && e.message.includes("insufficient permissions"))) {
-        setError("Firestore отклонил запись. Проверь правила в Firebase Console → Firestore → Rules.");
+        setError("Камера занята другим приложением.");
       } else {
-        setError("Ошибка: " + (e.message || e.code || e.name));
+        setError("Ошибка: " + (e.message || e.name));
       }
     }
     setStarting(false);
@@ -112,12 +133,25 @@ export default function Stream() {
   };
 
   const handleOffer = async (adminUid, sdp, signalId) => {
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-    });
+    if (pcRef.current) {
+      try { pcRef.current.close(); } catch (e) {}
+      pcRef.current = null;
+    }
+    if (!streamRef.current) {
+      setStatus("Камера отключена");
+      return;
+    }
+
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     pcRef.current = pc;
 
-    streamRef.current.getTracks().forEach(track => pc.addTrack(track, streamRef.current));
+    const videoTrack = streamRef.current.getVideoTracks()[0];
+    if (!videoTrack) {
+      setStatus("Нет видеотрека");
+      return;
+    }
+    videoTrack.enabled = true;
+    pc.addTrack(videoTrack, streamRef.current);
 
     pc.onicecandidate = async (event) => {
       if (event.candidate) {
@@ -130,6 +164,18 @@ export default function Stream() {
           createdAt: new Date().toISOString()
         });
       }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log("stream ICE:", pc.iceConnectionState);
+      if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
+        setStatus("Стрим идёт");
+      } else if (pc.iceConnectionState === "failed") {
+        setStatus("Не удалось соединиться, пробую TURN");
+      }
+    };
+    pc.onconnectionstatechange = () => {
+      console.log("stream Conn:", pc.connectionState);
     };
 
     await pc.setRemoteDescription({ type: "offer", sdp });
@@ -186,36 +232,16 @@ export default function Stream() {
       {error && <div className="error">{error}</div>}
 
       <div style={{ maxWidth: 700, margin: "0 auto" }}>
-        <div style={{
-          background: "var(--bg-2)",
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-          padding: 16,
-          marginBottom: 16
-        }}>
+        <div style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 12, padding: 16, marginBottom: 16 }}>
           <video
             ref={videoRef}
             autoPlay
             muted
             playsInline
-            style={{
-              width: "100%",
-              borderRadius: 8,
-              background: "#000",
-              minHeight: 300,
-              display: streaming ? "block" : "none"
-            }}
+            style={{ width: "100%", borderRadius: 8, background: "#000", minHeight: 300, display: streaming ? "block" : "none" }}
           />
           {!streaming && (
-            <div style={{
-              minHeight: 300,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "var(--text-dim)",
-              flexDirection: "column",
-              gap: 10
-            }}>
+            <div style={{ minHeight: 300, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", flexDirection: "column", gap: 10 }}>
               <CameraIcon size={48} />
               <p>{starting ? "Запуск камеры..." : "Камера выключена"}</p>
             </div>
@@ -223,9 +249,7 @@ export default function Stream() {
         </div>
 
         {status && (
-          <p style={{ textAlign: "center", color: "var(--text-dim)", marginBottom: 12 }}>
-            {status}
-          </p>
+          <p style={{ textAlign: "center", color: "var(--text-dim)", marginBottom: 12 }}>{status}</p>
         )}
 
         {!streaming ? (
@@ -233,13 +257,11 @@ export default function Stream() {
             <CameraIcon /> {starting ? "Запуск..." : "Включить камеру"}
           </button>
         ) : (
-          <button className="secondary" onClick={stopStream}>
-            Выключить камеру
-          </button>
+          <button className="secondary" onClick={stopStream}>Выключить камеру</button>
         )}
 
         <p style={{ marginTop: 16, color: "var(--text-dim)", fontSize: 13, textAlign: "center" }}>
-          Если камера не включается — нажми на замочек в адресной строке, разреши камеру и обнови страницу.
+          Держи приложение открытым и на переднем плане, пока идёт трансляция.
         </p>
       </div>
     </Layout>

@@ -14,6 +14,14 @@ import { getAllClasses, createClass, deleteClass, addGroup, removeGroup } from "
 
 const DAYS = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 
+const ICE_SERVERS = [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" },
+  { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
+  { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
+  { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" }
+];
+
 export default function Admin() {
   const [user, setUser] = useState(null);
   const [tab, setTab] = useState("schedule");
@@ -27,8 +35,9 @@ export default function Admin() {
   const [newGroup, setNewGroup] = useState("");
   const [users, setUsers] = useState([]);
   const [streams, setStreams] = useState({});
-  const [watching, setWatching] = useState(null); // uid, кого смотрим
+  const [watching, setWatching] = useState(null);
   const [watchStatus, setWatchStatus] = useState("");
+  const [watchInfo, setWatchInfo] = useState("");
   const videoRef = useRef(null);
   const pcRef = useRef(null);
   const unsubsRef = useRef([]);
@@ -47,7 +56,6 @@ export default function Admin() {
     await reloadClasses();
     await loadUsers();
 
-    // Подписка на онлайн-стримы
     const unsub = onSnapshot(collection(db, "streams"), (snap) => {
       const map = {};
       snap.forEach(d => {
@@ -189,28 +197,37 @@ export default function Admin() {
     showToast(`Группа ${g} удалена из ${name}`);
   };
 
-  // === ПРОСМОТР СТРИМА ИЗ АДМИНКИ ===
   const startWatch = async (targetUid) => {
     if (!streams[targetUid]) {
       showToast("Этот пользователь сейчас не стримит");
       return;
     }
-    // Останавливаем предыдущий просмотр
     stopWatch();
 
     setWatching(targetUid);
     setWatchStatus("Установка соединения...");
+    setWatchInfo("");
 
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-    });
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     pcRef.current = pc;
 
     pc.ontrack = (event) => {
-      setWatchStatus("Видео подключено");
+      setWatchStatus("Получение видео...");
       if (videoRef.current) {
         videoRef.current.srcObject = event.streams[0];
-        videoRef.current.play().catch(() => {});
+        videoRef.current.play().then(() => {
+          setWatchStatus("Видео подключено");
+          setTimeout(() => {
+            const v = videoRef.current;
+            if (v) {
+              if (v.videoWidth === 0) {
+                setWatchInfo("Кадры не идут. Ученик должен держать экран активным.");
+              } else {
+                setWatchInfo(`Кадры: ${v.videoWidth}x${v.videoHeight}`);
+              }
+            }
+          }, 2000);
+        }).catch((e) => setWatchStatus("Ошибка: " + e.message));
       }
     };
 
@@ -225,6 +242,19 @@ export default function Admin() {
           createdAt: new Date().toISOString()
         });
       }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log("admin watch ICE:", pc.iceConnectionState);
+      if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
+        setWatchStatus("Соединение установлено");
+      }
+      if (pc.iceConnectionState === "failed") {
+        setWatchStatus("ICE failed. TURN не сработал — попробуй с телефона по Wi-Fi.");
+      }
+    };
+    pc.onconnectionstatechange = () => {
+      console.log("admin watch Conn:", pc.connectionState);
     };
 
     const offer = await pc.createOffer({ offerToReceiveVideo: true });
@@ -278,17 +308,23 @@ export default function Admin() {
   };
 
   const stopWatch = () => {
-    unsubsRef.current.forEach(u => u());
-    unsubsRef.current = [];
+    unsubsRef.current = unsubsRef.current.filter(u => {
+      if (typeof u === "function") {
+        try { u(); } catch (e) {}
+        return false;
+      }
+      return true;
+    });
     if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
     if (videoRef.current) videoRef.current.srcObject = null;
     setWatching(null);
     setWatchStatus("");
+    setWatchInfo("");
   };
 
   useEffect(() => {
     return () => {
-      unsubsRef.current.forEach(u => u());
+      unsubsRef.current.forEach(u => { try { u(); } catch (e) {} });
       if (pcRef.current) pcRef.current.close();
     };
   }, []);
@@ -452,6 +488,9 @@ export default function Admin() {
                 style={{ width: "100%", maxWidth: 700, borderRadius: 8, background: "#000", minHeight: 350 }}
               />
               <p style={{ color: "var(--text-dim)", fontSize: 13, marginTop: 8 }}>{watchStatus}</p>
+              {watchInfo && (
+                <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 4 }}>{watchInfo}</p>
+              )}
             </div>
           )}
 
