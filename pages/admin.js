@@ -1,32 +1,14 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { db } from "../firebase";
-import {
-  doc, getDoc, setDoc, collection, getDocs, onSnapshot,
-  addDoc, query, where
-} from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, getDocs } from "firebase/firestore";
 import Layout from "../components/Layout";
 import SaveIcon from "../components/icons/SaveIcon";
 import GithubIcon from "../components/icons/GithubIcon";
 import FirebaseIcon from "../components/icons/FirebaseIcon";
-import CameraIcon from "../components/icons/CameraIcon";
 import { getAllClasses, createClass, deleteClass, addGroup, removeGroup } from "../lib/classes";
 
 const DAYS = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
-
-const ICE_SERVERS = [
-  { urls: "stun:stun.l.google.com:19302" },
-  {
-    urls: "turn:openrelay.metered.ca:443",
-    username: "openrelayproject",
-    credential: "openrelayproject"
-  },
-  {
-    urls: "turn:openrelay.metered.ca:443?transport=tcp",
-    username: "openrelayproject",
-    credential: "openrelayproject"
-  }
-];
 
 export default function Admin() {
   const [user, setUser] = useState(null);
@@ -40,13 +22,6 @@ export default function Admin() {
   const [newClass, setNewClass] = useState("");
   const [newGroup, setNewGroup] = useState("");
   const [users, setUsers] = useState([]);
-  const [streams, setStreams] = useState({});
-  const [watching, setWatching] = useState(null);
-  const [watchStatus, setWatchStatus] = useState("");
-  const [watchInfo, setWatchInfo] = useState("");
-  const videoRef = useRef(null);
-  const pcRef = useRef(null);
-  const unsubsRef = useRef([]);
   const router = useRouter();
 
   useEffect(() => {
@@ -61,16 +36,6 @@ export default function Admin() {
   const init = async () => {
     await reloadClasses();
     await loadUsers();
-
-    const unsub = onSnapshot(collection(db, "streams"), (snap) => {
-      const map = {};
-      snap.forEach(d => {
-        const data = d.data();
-        if (data.online) map[d.id] = data;
-      });
-      setStreams(map);
-    });
-    unsubsRef.current.push(unsub);
   };
 
   const reloadClasses = async () => {
@@ -203,144 +168,6 @@ export default function Admin() {
     showToast(`Группа ${g} удалена из ${name}`);
   };
 
-  const startWatch = async (targetUid) => {
-    if (!streams[targetUid]) {
-      showToast("Этот пользователь сейчас не стримит");
-      return;
-    }
-    stopWatch();
-
-    setWatching(targetUid);
-    setWatchStatus("Установка соединения...");
-    setWatchInfo("");
-
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-    pcRef.current = pc;
-
-    pc.ontrack = (event) => {
-      setWatchStatus("Получение видео...");
-      if (videoRef.current) {
-        videoRef.current.srcObject = event.streams[0];
-        videoRef.current.play().then(() => {
-          setWatchStatus("Видео подключено");
-          setTimeout(() => {
-            const v = videoRef.current;
-            if (v) {
-              if (v.videoWidth === 0) {
-                setWatchInfo("Кадры не идут. Ученик должен держать экран активным.");
-              } else {
-                setWatchInfo(`Кадры: ${v.videoWidth}x${v.videoHeight}`);
-              }
-            }
-          }, 2000);
-        }).catch((e) => setWatchStatus("Ошибка: " + e.message));
-      }
-    };
-
-    pc.onicecandidate = async (event) => {
-      if (event.candidate) {
-        await addDoc(collection(db, "signals"), {
-          from: user.uid,
-          to: targetUid,
-          type: "ice",
-          candidate: event.candidate.candidate,
-          sdpMLineIndex: event.candidate.sdpMLineIndex,
-          createdAt: new Date().toISOString()
-        });
-      }
-    };
-
-    pc.oniceconnectionstatechange = () => {
-      console.log("admin watch ICE:", pc.iceConnectionState);
-      if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
-        setWatchStatus("Соединение установлено");
-      }
-      if (pc.iceConnectionState === "failed") {
-        setWatchStatus("ICE failed. TURN не сработал — попробуй с телефона по Wi-Fi.");
-      }
-    };
-    pc.onconnectionstatechange = () => {
-      console.log("admin watch Conn:", pc.connectionState);
-    };
-
-    const offer = await pc.createOffer({ offerToReceiveVideo: true });
-    await pc.setLocalDescription(offer);
-
-    const offerRef = await addDoc(collection(db, "signals"), {
-      from: user.uid,
-      to: targetUid,
-      type: "offer",
-      sdp: offer.sdp,
-      createdAt: new Date().toISOString()
-    });
-    const myOfferId = offerRef.id;
-
-    setWatchStatus("Ожидание ответа...");
-
-    const qAnswer = query(
-      collection(db, "signals"),
-      where("from", "==", targetUid),
-      where("to", "==", user.uid),
-      where("type", "==", "answer"),
-      where("forSignal", "==", myOfferId)
-    );
-    const unsubAnswer = onSnapshot(qAnswer, async (snap) => {
-      for (const d of snap.docs) {
-        const data = d.data();
-        if (pc.signalingState === "have-local-offer" && data.sdp) {
-          try {
-            await pc.setRemoteDescription({ type: "answer", sdp: data.sdp });
-            setWatchStatus("Видео подключено");
-          } catch (e) {
-            console.log("answer error:", e.message);
-          }
-        }
-      }
-    });
-    unsubsRef.current.push(unsubAnswer);
-
-    const qIce = query(
-      collection(db, "signals"),
-      where("from", "==", targetUid),
-      where("to", "==", user.uid),
-      where("type", "==", "ice")
-    );
-    const unsubIce = onSnapshot(qIce, async (snap) => {
-      for (const d of snap.docs) {
-        const data = d.data();
-        try {
-          await pc.addIceCandidate({
-            candidate: data.candidate,
-            sdpMLineIndex: data.sdpMLineIndex
-          });
-        } catch (e) {}
-      }
-    });
-    unsubsRef.current.push(unsubIce);
-  };
-
-  const stopWatch = () => {
-    unsubsRef.current = unsubsRef.current.filter(u => {
-      if (typeof u === "function") {
-        try { u(); } catch (e) {}
-        return false;
-      }
-      return true;
-    });
-    if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
-    if (videoRef.current) videoRef.current.srcObject = null;
-    setWatching(null);
-    setWatchStatus("");
-    setWatchInfo("");
-  };
-
-  useEffect(() => {
-    return () => {
-      unsubsRef.current.forEach(u => { try { u(); } catch (e) {} });
-      if (pcRef.current) pcRef.current.close();
-    };
-  }, []);
-
   if (!user) return null;
 
   const currentGroups = classes.find(c => c.id === grade)?.groups || [];
@@ -386,6 +213,9 @@ export default function Admin() {
           <div className="editor">
             <div>
               <p style={{ color: "var(--text-dim)", fontSize: 13, marginBottom: 10 }}>
+                Формат: день, затем уроки в виде <code>ЧЧ:ММ Предмет</code>. Пустая строка между днями.
+              </p>
+              <p style={{ color: "var(--text-dim)", fontSize: 13, marginBottom: 10 }}>
                 Редактируется: <strong style={{ color: "var(--accent)" }}>{grade} — группа {group}</strong>
               </p>
               <textarea rows="20" value={text} onChange={e => setText(e.target.value)} />
@@ -407,7 +237,7 @@ export default function Admin() {
                 <div key={day} style={{ marginBottom: 12 }}>
                   <strong>{day}</strong>
                   <ul style={{ listStyle: "none", paddingLeft: 12, marginTop: 4 }}>
-                    {lessons.map((l, i) => <li key={i} style={{ fontSize: 13, padding: "2px 0" }}>{i + 1}. {l}</li>)}
+                    {lessons.map((l, i) => <li key={i} style={{ fontSize: 13, padding: "2px 0" }}>{l}</li>)}
                   </ul>
                 </div>
               ))}
@@ -477,37 +307,8 @@ export default function Admin() {
 
       {tab === "users" && (
         <div>
-          {watching && (
-            <div style={{
-              background: "var(--bg-2)",
-              border: "1px solid var(--accent)",
-              borderRadius: 12,
-              padding: 16,
-              marginBottom: 20
-            }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <h3 style={{ color: "var(--accent)" }}>
-                  Смотрю: {users.find(u => u.id === watching)?.nick || watching}
-                </h3>
-                <button className="secondary" style={{ width: "auto" }} onClick={stopWatch}>
-                  Закрыть
-                </button>
-              </div>
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                style={{ width: "100%", maxWidth: 700, borderRadius: 8, background: "#000", minHeight: 350 }}
-              />
-              <p style={{ color: "var(--text-dim)", fontSize: 13, marginTop: 8 }}>{watchStatus}</p>
-              {watchInfo && (
-                <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 4 }}>{watchInfo}</p>
-              )}
-            </div>
-          )}
-
           <p style={{ color: "var(--text-dim)", marginBottom: 16 }}>
-            Всего: {users.length} пользователей · Онлайн: {Object.keys(streams).length}
+            Всего: {users.length} пользователей
           </p>
           <table>
             <thead>
@@ -516,58 +317,25 @@ export default function Admin() {
                 <th>Класс</th>
                 <th>Группа</th>
                 <th>Роль</th>
-                <th>Статус</th>
-                <th>Стрим</th>
               </tr>
             </thead>
             <tbody>
-              {users.map(u => {
-                const online = !!streams[u.id];
-                return (
-                  <tr key={u.id} style={{ borderTop: "1px solid var(--border)" }}>
-                    <td>{u.nick}</td>
-                    <td>{u.grade}</td>
-                    <td>{u.group}</td>
-                    <td>
-                      <span style={{
-                        background: u.role === "admin" ? "var(--accent)" : "var(--bg-3)",
-                        color: u.role === "admin" ? "#000" : "var(--text)",
-                        padding: "2px 8px",
-                        borderRadius: 999,
-                        fontSize: 12
-                      }}>{u.role}</span>
-                    </td>
-                    <td>
-                      <span style={{
-                        background: online ? "var(--ok)" : "var(--bg-3)",
-                        color: online ? "#fff" : "var(--text-dim)",
-                        padding: "2px 8px",
-                        borderRadius: 999,
-                        fontSize: 12
-                      }}>
-                        {online ? "● Онлайн" : "○ Офлайн"}
-                      </span>
-                    </td>
-                    <td>
-                      <button
-                        className="secondary"
-                        style={{
-                          width: "auto",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 6,
-                          fontSize: 13,
-                          padding: "6px 12px"
-                        }}
-                        onClick={() => online ? startWatch(u.id) : showToast("Пользователь не стримит")}
-                        disabled={!online}
-                      >
-                        <CameraIcon size={14} /> {online ? "Смотреть" : "Недоступен"}
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
+              {users.map(u => (
+                <tr key={u.id} style={{ borderTop: "1px solid var(--border)" }}>
+                  <td>{u.nick}</td>
+                  <td>{u.grade}</td>
+                  <td>{u.group}</td>
+                  <td>
+                    <span style={{
+                      background: u.role === "admin" ? "var(--accent)" : "var(--bg-3)",
+                      color: u.role === "admin" ? "#000" : "var(--text)",
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      fontSize: 12
+                    }}>{u.role}</span>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
