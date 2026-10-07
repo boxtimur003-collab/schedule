@@ -16,10 +16,16 @@ const DAYS = ["Понедельник", "Вторник", "Среда", "Чет�
 
 const ICE_SERVERS = [
   { urls: "stun:stun.l.google.com:19302" },
-  { urls: "stun:stun1.l.google.com:19302" },
-  { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
-  { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
-  { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" }
+  {
+    urls: "turn:openrelay.metered.ca:443",
+    username: "openrelayproject",
+    credential: "openrelayproject"
+  },
+  {
+    urls: "turn:openrelay.metered.ca:443?transport=tcp",
+    username: "openrelayproject",
+    credential: "openrelayproject"
+  }
 ];
 
 export default function Admin() {
@@ -260,13 +266,14 @@ export default function Admin() {
     const offer = await pc.createOffer({ offerToReceiveVideo: true });
     await pc.setLocalDescription(offer);
 
-    await addDoc(collection(db, "signals"), {
+    const offerRef = await addDoc(collection(db, "signals"), {
       from: user.uid,
       to: targetUid,
       type: "offer",
       sdp: offer.sdp,
       createdAt: new Date().toISOString()
     });
+    const myOfferId = offerRef.id;
 
     setWatchStatus("Ожидание ответа...");
 
@@ -274,14 +281,19 @@ export default function Admin() {
       collection(db, "signals"),
       where("from", "==", targetUid),
       where("to", "==", user.uid),
-      where("type", "==", "answer")
+      where("type", "==", "answer"),
+      where("forSignal", "==", myOfferId)
     );
     const unsubAnswer = onSnapshot(qAnswer, async (snap) => {
       for (const d of snap.docs) {
         const data = d.data();
-        if (data.sdp && pc.signalingState !== "stable") {
-          await pc.setRemoteDescription({ type: "answer", sdp: data.sdp });
-          setWatchStatus("Видео подключено");
+        if (pc.signalingState === "have-local-offer" && data.sdp) {
+          try {
+            await pc.setRemoteDescription({ type: "answer", sdp: data.sdp });
+            setWatchStatus("Видео подключено");
+          } catch (e) {
+            console.log("answer error:", e.message);
+          }
         }
       }
     });
