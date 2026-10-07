@@ -1,0 +1,144 @@
+{
+  "Понедельник": [
+    {
+      "slot": 1,
+      "subject": "Разговоры о важном",
+      "note": "308",
+      "extra": true
+    },
+    {
+      "slot": 2,
+      "subject": "Алгебра",
+      "note": "",
+      "extra": false
+    },
+    {
+      "slot": 3,
+      "subject": "Алгебра",
+      "note": "",
+      "extra": false
+    },
+    {
+      "slot": 4,
+      "subject": "Физика",
+      "note": "",
+      "extra": false
+    },
+    {
+      "slot": 5,
+      "subject": "ОБЗР",
+      "note": "",
+      "extra": false
+    },
+    {
+      "slot": 6,
+      "subject": "География",
+      "note": "",
+      "extra": false
+    },
+    {
+      "slot": 7,
+      "subject": "Литература",
+      "note": "",
+      "extra": false
+    }
+  ],
+  "Вторник": [
+    {
+      "slot": 1,
+      "subject": "Физика",
+      "note": "",
+      "extra": false
+    },
+    {
+      "slot": 2,
+      "subject": "Физика",
+      "note": "",
+      "extra": false
+    },
+    {
+      "slot": 3,
+      "subject": "Биология",
+      "note": "",
+      "extra": false
+    },
+    {
+      "slot": 4,
+      "subject": "Обществознание",
+      "note": "",
+      "extra": false
+    },
+    {
+      "slot": 5,
+      "subject": "Физкультура",
+      "note": "",
+      "extra": false
+    },
+    {
+      "slot": 6,
+      "subject": "Русский язык",
+      "note": "",
+      "extra": false
+    }
+  ],
+  "Среда": [
+    {
+      "slot": 1,
+      "subject": "Геометрия",
+      "note": "211",
+      "extra": false
+    },
+    {
+      "slot": 2,
+      "subject": "Геометрия",
+      "note": "",
+      "extra": false
+    },
+    {
+      "slot": 3,
+      "subject": "Проектная деятельность",
+      "note": "",
+      "extra": false
+    },
+    {
+      "slot": 4,
+      "subject": "Обществознание",
+      "note": "",
+      "extra": false
+    },
+    {
+      "slot": 5,
+      "subject": "Английский язык",
+      "note": "",
+      "extra": false
+    },
+    {
+      "slot": 6,
+      "subject": "Английский язык",
+      "note": "",
+      "extra": false
+    },
+    {
+      "slot": 7,
+      "subject": "История",
+      "note": "",
+      "extra": false
+    }
+  ],
+  "Четверг": [
+    {
+      "slot": 1,
+      "subject": "Алгебра",
+      "note": "",
+      "extra": false
+    },
+    {
+      "slot": 2,
+      "subject": "Алгебра",
+      "note": "",
+      "extra": false
+    }
+  ],
+  "Пятница": [],
+  "Суббота": []
+}
