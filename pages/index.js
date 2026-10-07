@@ -1,24 +1,69 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/router";
 import { auth, db, NICK_DOMAIN } from "../firebase";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
-import { useRouter } from "next/router";
-import { seedDefaultClasses } from "../lib/classes";
+import { getAllClasses } from "../lib/classes";
+import { loadProfile, saveProfile } from "../lib/storage";
 
-export default function Login() {
+export default function Home() {
+  const [step, setStep] = useState(0);
+  const [device, setDevice] = useState("");
+  const [classes, setClasses] = useState([]);
+  const [grade, setGrade] = useState("");
+  const [group, setGroup] = useState("");
+  const [error, setError] = useState("");
+  const [showLogin, setShowLogin] = useState(false);
   const [nick, setNick] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [loginError, setLoginError] = useState("");
   const router = useRouter();
 
+  // При загрузке — проверяем, есть ли профиль в кеше
   useEffect(() => {
-    // Однократно создаём стартовые классы, если их ещё нет
-    seedDefaultClasses().catch(() => {});
+    const profile = loadProfile();
+    if (profile && profile.grade && profile.group) {
+      router.push("/schedule");
+    }
   }, []);
+
+  // Загружаем классы, когда доходит до шага 2
+  useEffect(() => {
+    if (step === 2) {
+      loadClasses();
+    }
+  }, [step]);
+
+  const loadClasses = async () => {
+    try {
+      const list = await getAllClasses();
+      setClasses(list);
+      if (list.length > 0) {
+        setGrade(list[0].id);
+        setGroup((list[0].groups || [])[0] || "1");
+      }
+    } catch (e) {
+      setError("Не удалось загрузить классы: " + e.message);
+    }
+  };
+
+  const handleDevice = (d) => {
+    setDevice(d);
+    setStep(1);
+  };
+
+  const handleFinish = () => {
+    if (!grade || !group) {
+      setError("Выбери класс и группу");
+      return;
+    }
+    saveProfile({ device, grade, group, onboardingDone: true });
+    router.push("/schedule");
+  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    setError("");
+    setLoginError("");
     try {
       const email = `${nick.toLowerCase()}@${NICK_DOMAIN}`;
       const cred = await signInWithEmailAndPassword(auth, email, password);
@@ -28,27 +73,163 @@ export default function Login() {
       if (userData.role === "admin") router.push("/admin");
       else router.push("/schedule");
     } catch (err) {
-      setError("Неверный ник или пароль");
+      setLoginError("Неверный ник или пароль");
     }
   };
 
+  const currentGroups = classes.find(c => c.id === grade)?.groups || [];
+
   return (
-    <div className="form-card">
-      <h2>Вход</h2>
-      {error && <div className="error">{error}</div>}
-      <form onSubmit={handleLogin}>
-        <div className="field">
-          <label>Ник</label>
-          <input value={nick} onChange={e => setNick(e.target.value)} placeholder="Например: timur" required />
-        </div>
-        <div className="field">
-          <label>Пароль</label>
-          <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required />
-        </div>
-        <button type="submit">Войти</button>
-      </form>
-      <div className="link-row">
-        Нет аккаунта? <a href="/register">Зарегистрироваться</a>
+    <div style={{
+      minHeight: "100vh",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 20,
+      background: "var(--bg)"
+    }}>
+      <div style={{
+        maxWidth: 480,
+        width: "100%",
+        background: "var(--bg-2)",
+        border: "1px solid var(--border)",
+        borderRadius: 16,
+        padding: 32
+      }}>
+        {!showLogin ? (
+          <>
+            {/* Прогресс */}
+            <div style={{
+              display: "flex",
+              gap: 6,
+              marginBottom: 24
+            }}>
+              {[0, 1, 2].map(i => (
+                <div key={i} style={{
+                  flex: 1,
+                  height: 4,
+                  borderRadius: 999,
+                  background: step >= i ? "var(--accent)" : "var(--bg-3)"
+                }} />
+              ))}
+            </div>
+
+            {/* Шаг 0: устройство */}
+            {step === 0 && (
+              <>
+                <h2 style={{ fontSize: 22, marginBottom: 8 }}>Добро пожаловать!</h2>
+                <p style={{ color: "var(--text-dim)", marginBottom: 24, fontSize: 14 }}>
+                  Выбери устройство, чтобы начать
+                </p>
+                <div style={{ display: "flex", gap: 12 }}>
+                  <button
+                    className="secondary"
+                    onClick={() => handleDevice("mobile")}
+                    style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, padding: 20 }}
+                  >
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="6" y="2" width="12" height="20" rx="2" />
+                      <line x1="12" y1="18" x2="12" y2="18" />
+                    </svg>
+                    <span>Мобильное</span>
+                  </button>
+                  <button
+                    className="secondary"
+                    onClick={() => handleDevice("desktop")}
+                    style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, padding: 20 }}
+                  >
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="2" y="3" width="20" height="14" rx="2" />
+                      <line x1="8" y1="21" x2="16" y2="21" />
+                      <line x1="12" y1="17" x2="12" y2="21" />
+                    </svg>
+                    <span>ПК</span>
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Шаг 1: подтверждение устройства */}
+            {step === 1 && (
+              <>
+                <h2 style={{ fontSize: 22, marginBottom: 8 }}>Ты выбрал</h2>
+                <p style={{ color: "var(--text-dim)", marginBottom: 24, fontSize: 14 }}>
+                  {device === "mobile" ? "Мобильное устройство" : "Персональный компьютер"}
+                </p>
+                <div style={{ display: "flex", gap: 12 }}>
+                  <button className="secondary" onClick={() => setStep(0)}>Назад</button>
+                  <button onClick={() => setStep(2)}>Далее</button>
+                </div>
+              </>
+            )}
+
+            {/* Шаг 2: класс и группа */}
+            {step === 2 && (
+              <>
+                <h2 style={{ fontSize: 22, marginBottom: 8 }}>Твой класс</h2>
+                <p style={{ color: "var(--text-dim)", marginBottom: 24, fontSize: 14 }}>
+                  Это можно потом поменять в настройках
+                </p>
+
+                {error && <div className="error">{error}</div>}
+
+                <div className="field">
+                  <label>Класс</label>
+                  <select value={grade} onChange={e => {
+                    setGrade(e.target.value);
+                    const g = classes.find(c => c.id === e.target.value)?.groups || [];
+                    setGroup(g[0] || "1");
+                  }}>
+                    {classes.map(c => <option key={c.id} value={c.id}>{c.id}</option>)}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Группа</label>
+                  <select value={group} onChange={e => setGroup(e.target.value)}>
+                    {currentGroups.map(g => <option key={g} value={g}>Группа {g}</option>)}
+                  </select>
+                </div>
+
+                <div style={{ display: "flex", gap: 12, marginTop: 20 }}>
+                  <button className="secondary" onClick={() => setStep(1)}>Назад</button>
+                  <button onClick={handleFinish}>Продолжить</button>
+                </div>
+              </>
+            )}
+
+            {/* Ссылка на вход */}
+            <div style={{ textAlign: "center", marginTop: 24 }}>
+              <a
+                onClick={() => setShowLogin(true)}
+                style={{ cursor: "pointer", color: "var(--text-dim)", fontSize: 13 }}
+              >
+                Войти в аккаунт
+              </a>
+            </div>
+          </>
+        ) : (
+          <>
+            <h2 style={{ fontSize: 22, marginBottom: 24, textAlign: "center" }}>Вход</h2>
+            {loginError && <div className="error">{loginError}</div>}
+            <form onSubmit={handleLogin}>
+              <div className="field">
+                <label>Ник</label>
+                <input value={nick} onChange={e => setNick(e.target.value)} required />
+              </div>
+              <div className="field">
+                <label>Пароль</label>
+                <input type="password" value={password} onChange={e => setPassword(e.target.value)} required />
+              </div>
+              <button type="submit">Войти</button>
+            </form>
+            <div style={{ textAlign: "center", marginTop: 16, display: "flex", justifyContent: "space-between" }}>
+              <a onClick={() => setShowLogin(false)} style={{ cursor: "pointer", color: "var(--text-dim)", fontSize: 13 }}>
+                ← Назад
+              </a>
+              <a href="/register" style={{ fontSize: 13 }}>Зарегистрироваться</a>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

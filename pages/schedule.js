@@ -6,6 +6,8 @@ import Layout from "../components/Layout";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import DownloadIcon from "../components/icons/DownloadIcon";
+import { loadProfile } from "../lib/storage";
+import { getTimeSlots } from "../lib/slots";
 
 const DAYS = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 const DAYS_SHORT = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
@@ -14,91 +16,83 @@ const MONTHS = [
   "июля", "августа", "сентября", "октября", "ноября", "декабря"
 ];
 
-// Длительность урока по умолчанию — 45 минут
-const LESSON_DURATION = 45;
-
-// Парсим строку урока: "08:30 Математика" → { time: "08:30", start: Date, end: Date, subject: "Математика" }
-function parseLesson(line, baseDate) {
-  const match = line.match(/^(\d{1,2}):(\d{2})\s+(.+)$/);
-  if (!match) {
-    return { time: null, subject: line, start: null, end: null };
-  }
-  const [, hh, mm, subject] = match;
-  const start = new Date(baseDate);
-  start.setHours(parseInt(hh, 10), parseInt(mm, 10), 0, 0);
-  const end = new Date(start.getTime() + LESSON_DURATION * 60 * 1000);
-  return {
-    time: `${hh.padStart(2, "0")}:${mm}`,
-    subject: subject.trim(),
-    start,
-    end
-  };
-}
-
 export default function Schedule() {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(null);       // либо аккаунт, либо из профиля
   const [schedule, setSchedule] = useState(null);
+  const [slots, setSlots] = useState([]);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(new Date());
   const router = useRouter();
 
-  // Тик каждую секунду — обновляем текущее время
   useEffect(() => {
     const interval = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
+    // Приоритет: аккаунт → профиль
     const stored = localStorage.getItem("user");
-    if (!stored) return router.push("/");
-    const u = JSON.parse(stored);
+    const profile = loadProfile();
+
+    let u = null;
+    if (stored) {
+      try { u = JSON.parse(stored); } catch (e) {}
+    }
+    if (!u && profile) {
+      u = { nick: profile.nick || "Гость", grade: profile.grade, group: profile.group, role: "student", guest: true };
+    }
+
+    if (!u) {
+      router.push("/");
+      return;
+    }
+
     setUser(u);
-    loadSchedule(u);
+    loadAll(u);
   }, []);
 
-  const loadSchedule = async (u) => {
-    const id = `${u.grade}-${u.group}`;
-    const snap = await getDoc(doc(db, "schedules", id));
-    setSchedule(snap.exists() ? snap.data() : {});
+  const loadAll = async (u) => {
+    try {
+      const id = `${u.grade}-${u.group}`;
+      const [snap, timeSlots] = await Promise.all([
+        getDoc(doc(db, "schedules", id)),
+        getTimeSlots()
+      ]);
+      setSchedule(snap.exists() ? snap.data() : {});
+      setSlots(timeSlots);
+    } catch (e) {
+      console.error(e);
+    }
     setLoading(false);
   };
 
-  // Определяем сегодняшний день недели
-  const todayIndex = now.getDay(); // 0=Вс, 1=Пн...
+  // === Текущее время ===
+  const todayIndex = now.getDay();
   const todayName = todayIndex === 0 ? null : DAYS[todayIndex - 1];
 
-  // Собираем уроки на сегодня с временем
+  // Сегодняшние уроки — с разрешённым временем из slots
   const todayLessons = (() => {
     if (!todayName || !schedule) return [];
     const raw = schedule[todayName] || [];
-    return raw.map(l => parseLesson(l, now));
+    return raw.map(item => {
+      // item = { slot, subject, note, extra }
+      const slotData = slots.find(s => s.slot === item.slot);
+      if (!slotData) return { ...item, time: null, start: null, end: null };
+      const [sh, sm] = slotData.start.split(":").map(Number);
+      const [eh, em] = slotData.end.split(":").map(Number);
+      const start = new Date(now); start.setHours(sh, sm, 0, 0);
+      const end = new Date(now); end.setHours(eh, em, 0, 0);
+      return { ...item, time: `${slotData.start}–${slotData.end}`, start, end };
+    });
   })();
 
-  // Текущий урок (start <= now < end)
-  const currentLesson = todayLessons.find(l =>
-    l.start && l.end && now >= l.start && now < l.end
-  );
-
-  // Следующий урок (start > now)
+  const currentLesson = todayLessons.find(l => l.start && l.end && now >= l.start && now < l.end);
   const nextLesson = todayLessons.find(l => l.start && l.start > now);
-
-  // Прогресс текущего урока (0..1)
-  const progress = (() => {
-    if (!currentLesson) return 0;
-    const total = currentLesson.end - currentLesson.start;
-    const elapsed = now - currentLesson.start;
-    return Math.min(1, Math.max(0, elapsed / total));
-  })();
-
-  // Оставшиеся минуты до конца текущего урока
-  const minutesLeft = currentLesson
-    ? Math.max(0, Math.round((currentLesson.end - now) / 60000))
+  const progress = currentLesson
+    ? Math.min(1, Math.max(0, (now - currentLesson.start) / (currentLesson.end - currentLesson.start)))
     : 0;
-
-  // Минут до следующего урока
-  const minutesToNext = nextLesson
-    ? Math.max(0, Math.round((nextLesson.start - now) / 60000))
-    : 0;
+  const minutesLeft = currentLesson ? Math.max(0, Math.round((currentLesson.end - now) / 60000)) : 0;
+  const minutesToNext = nextLesson ? Math.max(0, Math.round((nextLesson.start - now) / 60000)) : 0;
 
   const timeString = now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const dateString = `${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
@@ -106,29 +100,33 @@ export default function Schedule() {
   const downloadPDF = async () => {
     try {
       const docPdf = new jsPDF({ unit: "pt", format: "a4" });
-      const robotoRegular = await loadFont("/fonts/Roboto-Regular.ttf");
-      const robotoBold = await loadFont("/fonts/Roboto-Bold.ttf");
-      docPdf.addFileToVFS("Roboto-Regular.ttf", robotoRegular);
+      const r = await loadFont("/fonts/Roboto-Regular.ttf");
+      const b = await loadFont("/fonts/Roboto-Bold.ttf");
+      docPdf.addFileToVFS("Roboto-Regular.ttf", r);
       docPdf.addFont("Roboto-Regular.ttf", "Roboto", "normal");
-      docPdf.addFileToVFS("Roboto-Bold.ttf", robotoBold);
+      docPdf.addFileToVFS("Roboto-Bold.ttf", b);
       docPdf.addFont("Roboto-Bold.ttf", "Roboto", "bold");
-
       docPdf.setFont("Roboto", "bold");
       docPdf.setFontSize(18);
       docPdf.text(`Расписание ${user.grade} — группа ${user.group}`, 40, 50);
 
       const body = DAYS.map(day => {
         const lessons = schedule[day] || [];
-        return [day, lessons.length === 0 ? "—" : lessons.join("\n")];
+        return [day, lessons.length === 0 ? "—" : lessons.map(l => {
+          const s = slots.find(x => x.slot === l.slot);
+          const t = s ? `${s.start}–${s.end}` : "";
+          const extra = l.extra ? " (доп.)" : "";
+          return `${t} ${l.subject}${extra}`;
+        }).join("\n")];
       });
 
       autoTable(docPdf, {
         startY: 80,
         head: [["День", "Уроки"]],
         body,
-        styles: { font: "Roboto", fontSize: 12, cellPadding: 8 },
+        styles: { font: "Roboto", fontSize: 11, cellPadding: 6 },
         headStyles: { font: "Roboto", fontStyle: "bold", fillColor: [255, 122, 24], textColor: 0 },
-        columnStyles: { 0: { cellWidth: 140 }, 1: { cellWidth: "auto" } },
+        columnStyles: { 0: { cellWidth: 120 }, 1: { cellWidth: "auto" } },
         theme: "grid"
       });
 
@@ -152,24 +150,33 @@ export default function Schedule() {
   return (
     <Layout user={user}>
       <div className="topbar">
-        <h1>Расписание {user.grade} — группа {user.group}</h1>
-        <button className="secondary" style={{ width: "auto", display: "flex", alignItems: "center", gap: 8 }} onClick={downloadPDF}>
-          <DownloadIcon /> Скачать PDF
-        </button>
+        <h1>{user.grade} — группа {user.group}</h1>
+        <div style={{ display: "flex", gap: 10 }}>
+          <a href="/settings" className="btn secondary" style={{
+            width: "auto", color: "var(--text)", background: "var(--bg-3)",
+            border: "1px solid var(--border)", padding: "8px 14px",
+            borderRadius: 8, textDecoration: "none", display: "flex", alignItems: "center", gap: 6
+          }}>⚙ Настройки</a>
+          <button className="secondary" style={{ width: "auto", display: "flex", alignItems: "center", gap: 8 }} onClick={downloadPDF}>
+            <DownloadIcon /> PDF
+          </button>
+        </div>
       </div>
 
-      {/* Блок текущего времени */}
       <div className="now-panel">
         <div className="now-time">{timeString}</div>
         <div className="now-date">{DAYS_SHORT[todayIndex]}, {dateString}</div>
       </div>
 
-      {/* Сейчас идёт */}
       {currentLesson ? (
         <div className="lesson-now">
           <div className="lesson-label">СЕЙЧАС ИДЁТ</div>
-          <div className="lesson-title">{currentLesson.subject}</div>
-          <div className="lesson-time">{currentLesson.time} — {currentLesson.end.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</div>
+          <div className="lesson-title">
+            {currentLesson.subject}
+            {currentLesson.extra && <span style={{ fontSize: 14, marginLeft: 8, opacity: 0.8 }}>(доп.)</span>}
+          </div>
+          <div className="lesson-time">{currentLesson.time}</div>
+          {currentLesson.note && <div className="lesson-note">📌 {currentLesson.note}</div>}
           <div className="lesson-progress">
             <div className="lesson-progress-bar" style={{ width: `${progress * 100}%` }} />
           </div>
@@ -182,40 +189,37 @@ export default function Schedule() {
             {nextLesson ? `Следующий: ${nextLesson.subject}` : "Уроков не осталось"}
           </div>
           {nextLesson && (
-            <div className="lesson-meta">Через {minutesToNext} мин · в {nextLesson.time}</div>
+            <div className="lesson-meta">Через {minutesToNext} мин · в {nextLesson.time.split("–")[0]}</div>
           )}
         </div>
       )}
 
-      {/* Следующий урок */}
       {currentLesson && nextLesson && (
         <div className="lesson-next">
           <span className="lesson-next-label">Следующий:</span>
           <strong>{nextLesson.subject}</strong>
-          <span className="lesson-next-time">в {nextLesson.time} · через {minutesToNext} мин</span>
+          <span className="lesson-next-time">в {nextLesson.time.split("–")[0]} · через {minutesToNext} мин</span>
         </div>
       )}
 
-      {/* Полное расписание на сегодня */}
       {todayName && (
         <div style={{ marginTop: 32 }}>
           <h2 style={{ fontSize: 18, marginBottom: 16, color: "var(--accent)" }}>
             Расписание на {todayName.toLowerCase()}
           </h2>
           <div className="day-list">
-            {todayLessons.length === 0 && (
-              <p style={{ color: "var(--text-dim)" }}>Уроков нет</p>
-            )}
+            {todayLessons.length === 0 && <p style={{ color: "var(--text-dim)", padding: 16 }}>Уроков нет</p>}
             {todayLessons.map((lesson, i) => {
-              const isCurrent = currentLesson && currentLesson.subject === lesson.subject && currentLesson.time === lesson.time;
+              const isCurrent = currentLesson && currentLesson.slot === lesson.slot;
               const isPast = lesson.end && now >= lesson.end;
               return (
-                <div
-                  key={i}
-                  className={`lesson-row ${isCurrent ? "current" : ""} ${isPast ? "past" : ""}`}
-                >
+                <div key={i} className={`lesson-row ${isCurrent ? "current" : ""} ${isPast ? "past" : ""}`}>
                   <div className="lesson-row-time">{lesson.time || "—"}</div>
-                  <div className="lesson-row-subject">{lesson.subject}</div>
+                  <div className="lesson-row-subject">
+                    {lesson.subject}
+                    {lesson.extra && <span style={{ fontSize: 12, color: "var(--accent)", marginLeft: 8 }}>доп.</span>}
+                    {lesson.note && <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>📌 {lesson.note}</div>}
+                  </div>
                   {isCurrent && <div className="lesson-row-badge">Сейчас</div>}
                 </div>
               );
@@ -224,7 +228,6 @@ export default function Schedule() {
         </div>
       )}
 
-      {/* Полное расписание на неделю */}
       <div style={{ marginTop: 32 }}>
         <h2 style={{ fontSize: 18, marginBottom: 16, color: "var(--accent)" }}>Вся неделя</h2>
         <div className="schedule-grid">
@@ -237,7 +240,17 @@ export default function Schedule() {
                   <p style={{ color: "var(--text-dim)", fontSize: 13 }}>Нет уроков</p>
                 ) : (
                   <ul>
-                    {lessons.map((l, i) => <li key={i}>{l}</li>)}
+                    {lessons.map((l, i) => {
+                      const s = slots.find(x => x.slot === l.slot);
+                      const time = s ? s.start : "";
+                      return (
+                        <li key={i}>
+                          <span style={{ color: "var(--text-dim)", marginRight: 8 }}>{time}</span>
+                          {l.subject}
+                          {l.extra && <span style={{ color: "var(--accent)", fontSize: 12, marginLeft: 6 }}>доп.</span>}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </div>

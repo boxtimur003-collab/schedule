@@ -7,6 +7,7 @@ import SaveIcon from "../components/icons/SaveIcon";
 import GithubIcon from "../components/icons/GithubIcon";
 import FirebaseIcon from "../components/icons/FirebaseIcon";
 import { getAllClasses, createClass, deleteClass, addGroup, removeGroup } from "../lib/classes";
+import { getTimeSlots, saveTimeSlots, DEFAULT_SLOTS } from "../lib/slots";
 
 const DAYS = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 
@@ -16,7 +17,8 @@ export default function Admin() {
   const [classes, setClasses] = useState([]);
   const [grade, setGrade] = useState("");
   const [group, setGroup] = useState("");
-  const [text, setText] = useState("");
+  const [grid, setGrid] = useState({}); // { "Понедельник": [ {slot, subject, note, extra}, ... ], ... }
+  const [slots, setSlots] = useState([]);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState("");
   const [newClass, setNewClass] = useState("");
@@ -35,7 +37,13 @@ export default function Admin() {
 
   const init = async () => {
     await reloadClasses();
+    await loadSlots();
     await loadUsers();
+  };
+
+  const loadSlots = async () => {
+    const s = await getTimeSlots();
+    setSlots(s);
   };
 
   const reloadClasses = async () => {
@@ -54,7 +62,20 @@ export default function Admin() {
     const id = `${g}-${gr}`;
     const snap = await getDoc(doc(db, "schedules", id));
     const data = snap.exists() ? snap.data() : {};
-    setText(serialize(data));
+    // Приводим к новому формату
+    const out = {};
+    DAYS.forEach(d => {
+      const lessons = data[d] || [];
+      out[d] = lessons.map((l, i) => {
+        if (typeof l === "string") {
+          // старый формат — "08:30 Математика" или "Математика"
+          const m = l.match(/^(\d{1,2}:\d{2})\s+(.+)$/);
+          return { slot: i + 1, subject: m ? m[2] : l, note: "", extra: false };
+        }
+        return { slot: l.slot || i + 1, subject: l.subject || "", note: l.note || "", extra: !!l.extra };
+      });
+    });
+    setGrid(out);
   };
 
   const loadUsers = async () => {
@@ -64,42 +85,52 @@ export default function Admin() {
     setUsers(list);
   };
 
-  const serialize = (data) => {
-    return DAYS.map(d => {
-      const lessons = data[d] || [];
-      return `${d}\n${lessons.join("\n")}`;
-    }).join("\n\n");
+  const updateLesson = (day, index, field, value) => {
+    setGrid(prev => {
+      const copy = { ...prev };
+      const arr = [...(copy[day] || [])];
+      arr[index] = { ...arr[index], [field]: value };
+      copy[day] = arr;
+      return copy;
+    });
   };
 
-  const parse = (raw) => {
-    const out = {};
-    raw.split("\n\n").forEach(block => {
-      const lines = block.split("\n").map(l => l.trim()).filter(Boolean);
-      if (lines.length === 0) return;
-      const [day, ...lessons] = lines;
-      out[day] = lessons;
+  const addLesson = (day) => {
+    setGrid(prev => {
+      const copy = { ...prev };
+      const arr = [...(copy[day] || [])];
+      arr.push({ slot: arr.length + 1, subject: "", note: "", extra: false });
+      copy[day] = arr;
+      return copy;
     });
-    return out;
+  };
+
+  const removeLesson = (day, index) => {
+    setGrid(prev => {
+      const copy = { ...prev };
+      const arr = [...(copy[day] || [])];
+      arr.splice(index, 1);
+      copy[day] = arr;
+      return copy;
+    });
   };
 
   const saveToFirestore = async () => {
     setSaving(true);
-    const data = parse(text);
     const id = `${grade}-${group}`;
-    await setDoc(doc(db, "schedules", id), data);
+    await setDoc(doc(db, "schedules", id), grid);
     showToast(`Firestore: ${id} сохранено`);
     setSaving(false);
   };
 
   const saveToGithub = async () => {
     setSaving(true);
-    const data = parse(text);
     const id = `${grade}-${group}`;
     try {
       const res = await fetch("/api/saveSchedule", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, data })
+        body: JSON.stringify({ id, data: grid })
       });
       const json = await res.json();
       if (json.ok) showToast(`GitHub: ${id} сохранено`);
@@ -168,6 +199,33 @@ export default function Admin() {
     showToast(`Группа ${g} удалена из ${name}`);
   };
 
+  // === Слоты времени ===
+  const updateSlot = (index, field, value) => {
+    setSlots(prev => {
+      const copy = [...prev];
+      copy[index] = { ...copy[index], [field]: value };
+      return copy;
+    });
+  };
+
+  const addSlot = () => {
+    setSlots(prev => [...prev, { slot: prev.length + 1, start: "08:00", end: "08:45" }]);
+  };
+
+  const removeSlot = (index) => {
+    setSlots(prev => prev.filter((_, i) => i !== index).map((s, i) => ({ ...s, slot: i + 1 })));
+  };
+
+  const saveSlots = async () => {
+    await saveTimeSlots(slots);
+    showToast("Сетка времени сохранена");
+  };
+
+  const resetSlots = () => {
+    if (!confirm("Сбросить сетку времени?")) return;
+    setSlots(DEFAULT_SLOTS);
+  };
+
   if (!user) return null;
 
   const currentGroups = classes.find(c => c.id === grade)?.groups || [];
@@ -184,6 +242,9 @@ export default function Admin() {
       <div className="tabs">
         <div className={`tab ${tab === "schedule" ? "active" : ""}`} onClick={() => setTab("schedule")}>
           📖 Расписание
+        </div>
+        <div className={`tab ${tab === "slots" ? "active" : ""}`} onClick={() => setTab("slots")}>
+          🕐 Время уроков
         </div>
         <div className={`tab ${tab === "classes" ? "active" : ""}`} onClick={() => setTab("classes")}>
           🏫 Классы
@@ -210,40 +271,89 @@ export default function Admin() {
             ))}
           </div>
 
-          <div className="editor">
-            <div>
-              <p style={{ color: "var(--text-dim)", fontSize: 13, marginBottom: 10 }}>
-                Формат: день, затем уроки в виде <code>ЧЧ:ММ Предмет</code>. Пустая строка между днями.
-              </p>
-              <p style={{ color: "var(--text-dim)", fontSize: 13, marginBottom: 10 }}>
-                Редактируется: <strong style={{ color: "var(--accent)" }}>{grade} — группа {group}</strong>
-              </p>
-              <textarea rows="20" value={text} onChange={e => setText(e.target.value)} />
-              <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
-                <button className="secondary" style={{ display: "flex", alignItems: "center", gap: 6, width: "auto" }} onClick={saveToFirestore} disabled={saving}>
-                  <FirebaseIcon /> Firestore
-                </button>
-                <button className="secondary" style={{ display: "flex", alignItems: "center", gap: 6, width: "auto" }} onClick={saveToGithub} disabled={saving}>
-                  <GithubIcon /> GitHub
-                </button>
-                <button style={{ display: "flex", alignItems: "center", gap: 6, width: "auto" }} onClick={saveBoth} disabled={saving}>
-                  <SaveIcon /> {saving ? "Сохранение..." : "Сохранить всё"}
+          <p style={{ color: "var(--text-dim)", fontSize: 13, marginBottom: 16 }}>
+            Редактируется: <strong style={{ color: "var(--accent)" }}>{grade} — группа {group}</strong>
+          </p>
+
+          {DAYS.map(day => (
+            <div key={day} className="day-card" style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <strong style={{ color: "var(--accent)" }}>{day}</strong>
+                <button className="secondary" style={{ width: "auto", fontSize: 12, padding: "4px 10px" }} onClick={() => addLesson(day)}>
+                  + Урок
                 </button>
               </div>
-            </div>
-            <div className="preview">
-              <h3 style={{ marginBottom: 12, fontSize: 15, color: "var(--accent)" }}>Предпросмотр — {grade}/{group}</h3>
-              {Object.entries(parse(text)).map(([day, lessons]) => (
-                <div key={day} style={{ marginBottom: 12 }}>
-                  <strong>{day}</strong>
-                  <ul style={{ listStyle: "none", paddingLeft: 12, marginTop: 4 }}>
-                    {lessons.map((l, i) => <li key={i} style={{ fontSize: 13, padding: "2px 0" }}>{l}</li>)}
-                  </ul>
+              {(grid[day] || []).map((lesson, i) => (
+                <div key={i} style={{ display: "grid", gridTemplateColumns: "80px 1fr 1fr auto auto", gap: 8, marginBottom: 8, alignItems: "center" }}>
+                  <select value={lesson.slot} onChange={e => updateLesson(day, i, "slot", Number(e.target.value))}>
+                    {slots.map(s => <option key={s.slot} value={s.slot}>{s.slot}</option>)}
+                  </select>
+                  <input
+                    value={lesson.subject}
+                    onChange={e => updateLesson(day, i, "subject", e.target.value)}
+                    placeholder="Предмет"
+                  />
+                  <input
+                    value={lesson.note || ""}
+                    onChange={e => updateLesson(day, i, "note", e.target.value)}
+                    placeholder="Пометка"
+                  />
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, whiteSpace: "nowrap" }}>
+                    <input
+                      type="checkbox"
+                      checked={!!lesson.extra}
+                      onChange={e => updateLesson(day, i, "extra", e.target.checked)}
+                      style={{ width: "auto" }}
+                    />
+                    доп.
+                  </label>
+                  <button className="secondary" style={{ width: "auto", padding: "6px 10px", color: "var(--danger)" }} onClick={() => removeLesson(day, i)}>×</button>
                 </div>
               ))}
+              {(grid[day] || []).length === 0 && (
+                <p style={{ color: "var(--text-dim)", fontSize: 13 }}>Нет уроков</p>
+              )}
             </div>
+          ))}
+
+          <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+            <button className="secondary" style={{ display: "flex", alignItems: "center", gap: 6, width: "auto" }} onClick={saveToFirestore} disabled={saving}>
+              <FirebaseIcon /> Firestore
+            </button>
+            <button className="secondary" style={{ display: "flex", alignItems: "center", gap: 6, width: "auto" }} onClick={saveToGithub} disabled={saving}>
+              <GithubIcon /> GitHub
+            </button>
+            <button style={{ display: "flex", alignItems: "center", gap: 6, width: "auto" }} onClick={saveBoth} disabled={saving}>
+              <SaveIcon /> {saving ? "Сохранение..." : "Сохранить всё"}
+            </button>
           </div>
         </>
+      )}
+
+      {tab === "slots" && (
+        <div style={{ maxWidth: 700 }}>
+          <div className="form-card" style={{ margin: "0 0 20px 0", maxWidth: "100%" }}>
+            <h3 style={{ marginBottom: 12, color: "var(--accent)" }}>Сетка времени уроков</h3>
+            <p style={{ color: "var(--text-dim)", fontSize: 13, marginBottom: 16 }}>
+              Одна на всю школу. Админ назначает время, ученики видят одно и то же.
+            </p>
+
+            {slots.map((s, i) => (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "60px 120px 120px auto", gap: 8, marginBottom: 8, alignItems: "center" }}>
+                <strong>{s.slot} урок</strong>
+                <input value={s.start} onChange={e => updateSlot(i, "start", e.target.value)} placeholder="08:30" />
+                <input value={s.end} onChange={e => updateSlot(i, "end", e.target.value)} placeholder="09:15" />
+                <button className="secondary" style={{ width: "auto", padding: "6px 10px", color: "var(--danger)" }} onClick={() => removeSlot(i)}>×</button>
+              </div>
+            ))}
+
+            <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+              <button className="secondary" onClick={addSlot} style={{ width: "auto" }}>+ Добавить</button>
+              <button className="secondary" onClick={resetSlots} style={{ width: "auto" }}>Сброс</button>
+              <button onClick={saveSlots} style={{ width: "auto" }}>Сохранить</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {tab === "classes" && (
@@ -251,12 +361,7 @@ export default function Admin() {
           <div className="form-card" style={{ margin: "0 0 20px 0", maxWidth: "100%" }}>
             <h3 style={{ marginBottom: 12, color: "var(--accent)" }}>Добавить новый класс</h3>
             <div style={{ display: "flex", gap: 10 }}>
-              <input
-                value={newClass}
-                onChange={e => setNewClass(e.target.value)}
-                placeholder="Например: 11А"
-                style={{ flex: 1 }}
-              />
+              <input value={newClass} onChange={e => setNewClass(e.target.value)} placeholder="Например: 11А" style={{ flex: 1 }} />
               <button onClick={handleCreateClass} style={{ width: "auto" }}>Добавить</button>
             </div>
           </div>
@@ -271,34 +376,15 @@ export default function Admin() {
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
                 {(c.groups || []).map(g => (
-                  <span key={g} style={{
-                    background: "var(--bg-3)",
-                    padding: "4px 10px",
-                    borderRadius: 999,
-                    fontSize: 13,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6
-                  }}>
+                  <span key={g} style={{ background: "var(--bg-3)", padding: "4px 10px", borderRadius: 999, fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
                     Группа {g}
-                    <span
-                      style={{ cursor: "pointer", color: "var(--danger)" }}
-                      onClick={() => handleRemoveGroup(c.id, g)}
-                    >×</span>
+                    <span style={{ cursor: "pointer", color: "var(--danger)" }} onClick={() => handleRemoveGroup(c.id, g)}>×</span>
                   </span>
                 ))}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <input
-                  value={grade === c.id ? newGroup : ""}
-                  onFocus={() => setGrade(c.id)}
-                  onChange={e => setNewGroup(e.target.value)}
-                  placeholder="Номер группы"
-                  style={{ flex: 1 }}
-                />
-                <button className="secondary" style={{ width: "auto" }} onClick={() => handleAddGroup(c.id)}>
-                  Добавить группу
-                </button>
+                <input value={grade === c.id ? newGroup : ""} onFocus={() => setGrade(c.id)} onChange={e => setNewGroup(e.target.value)} placeholder="Номер группы" style={{ flex: 1 }} />
+                <button className="secondary" style={{ width: "auto" }} onClick={() => handleAddGroup(c.id)}>Добавить группу</button>
               </div>
             </div>
           ))}
@@ -307,9 +393,7 @@ export default function Admin() {
 
       {tab === "users" && (
         <div>
-          <p style={{ color: "var(--text-dim)", marginBottom: 16 }}>
-            Всего: {users.length} пользователей
-          </p>
+          <p style={{ color: "var(--text-dim)", marginBottom: 16 }}>Всего: {users.length} пользователей</p>
           <table>
             <thead>
               <tr>
@@ -329,9 +413,7 @@ export default function Admin() {
                     <span style={{
                       background: u.role === "admin" ? "var(--accent)" : "var(--bg-3)",
                       color: u.role === "admin" ? "#000" : "var(--text)",
-                      padding: "2px 8px",
-                      borderRadius: 999,
-                      fontSize: 12
+                      padding: "2px 8px", borderRadius: 999, fontSize: 12
                     }}>{u.role}</span>
                   </td>
                 </tr>
