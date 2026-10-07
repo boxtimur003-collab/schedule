@@ -766,3 +766,23 @@ tbody tr:hover {
   .topbar { flex-direction: column; gap: 12px; align-items: flex-start; }
   .form-card { margin: 20px auto; padding: 24px; }
 }
+.lesson-row-room {
+  font-size: 13px;
+  color: var(--accent);
+  background: rgba(255,122,24,0.1);
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: var(--transition);
+}
+.lesson-row-room:hover {
+  background: rgba(255,122,24,0.2);
+}
+
+@media (max-width: 600px) {
+  .lesson-row-room {
+    font-size: 12px;
+    padding: 3px 8px;
+  }
+}

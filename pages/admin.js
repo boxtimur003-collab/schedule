@@ -17,7 +17,7 @@ export default function Admin() {
   const [classes, setClasses] = useState([]);
   const [grade, setGrade] = useState("");
   const [group, setGroup] = useState("");
-  const [grid, setGrid] = useState({}); // { "Понедельник": [ {slot, subject, note, extra}, ... ], ... }
+  const [grid, setGrid] = useState({});
   const [slots, setSlots] = useState([]);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState("");
@@ -62,13 +62,11 @@ export default function Admin() {
     const id = `${g}-${gr}`;
     const snap = await getDoc(doc(db, "schedules", id));
     const data = snap.exists() ? snap.data() : {};
-    // Приводим к новому формату
     const out = {};
     DAYS.forEach(d => {
       const lessons = data[d] || [];
       out[d] = lessons.map((l, i) => {
         if (typeof l === "string") {
-          // старый формат — "08:30 Математика" или "Математика"
           const m = l.match(/^(\d{1,2}:\d{2})\s+(.+)$/);
           return { slot: i + 1, subject: m ? m[2] : l, note: "", extra: false };
         }
@@ -199,7 +197,6 @@ export default function Admin() {
     showToast(`Группа ${g} удалена из ${name}`);
   };
 
-  // === Слоты времени ===
   const updateSlot = (index, field, value) => {
     setSlots(prev => {
       const copy = [...prev];
@@ -216,7 +213,7 @@ export default function Admin() {
     setSlots(prev => prev.filter((_, i) => i !== index).map((s, i) => ({ ...s, slot: i + 1 })));
   };
 
-  const saveSlots = async () => {
+  const saveSlotsFn = async () => {
     await saveTimeSlots(slots);
     showToast("Сетка времени сохранена");
   };
@@ -240,18 +237,10 @@ export default function Admin() {
       </div>
 
       <div className="tabs">
-        <div className={`tab ${tab === "schedule" ? "active" : ""}`} onClick={() => setTab("schedule")}>
-          📖 Расписание
-        </div>
-        <div className={`tab ${tab === "slots" ? "active" : ""}`} onClick={() => setTab("slots")}>
-          🕐 Время уроков
-        </div>
-        <div className={`tab ${tab === "classes" ? "active" : ""}`} onClick={() => setTab("classes")}>
-          🏫 Классы
-        </div>
-        <div className={`tab ${tab === "users" ? "active" : ""}`} onClick={() => setTab("users")}>
-          👥 Пользователи
-        </div>
+        <div className={`tab ${tab === "schedule" ? "active" : ""}`} onClick={() => setTab("schedule")}>📖 Расписание</div>
+        <div className={`tab ${tab === "slots" ? "active" : ""}`} onClick={() => setTab("slots")}>🕐 Время уроков</div>
+        <div className={`tab ${tab === "classes" ? "active" : ""}`} onClick={() => setTab("classes")}>🏫 Классы</div>
+        <div className={`tab ${tab === "users" ? "active" : ""}`} onClick={() => setTab("users")}>👥 Пользователи</div>
       </div>
 
       {tab === "schedule" && (
@@ -296,7 +285,7 @@ export default function Admin() {
                   <input
                     value={lesson.note || ""}
                     onChange={e => updateLesson(day, i, "note", e.target.value)}
-                    placeholder="Пометка"
+                    placeholder="Кабинет"
                   />
                   <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, whiteSpace: "nowrap" }}>
                     <input
@@ -335,22 +324,20 @@ export default function Admin() {
           <div className="form-card" style={{ margin: "0 0 20px 0", maxWidth: "100%" }}>
             <h3 style={{ marginBottom: 12, color: "var(--accent)" }}>Сетка времени уроков</h3>
             <p style={{ color: "var(--text-dim)", fontSize: 13, marginBottom: 16 }}>
-              Одна на всю школу. Админ назначает время, ученики видят одно и то же.
+              Одна на всю школу. Ученики видят одно и то же.
             </p>
-
             {slots.map((s, i) => (
-              <div key={i} style={{ display: "grid", gridTemplateColumns: "60px 120px 120px auto", gap: 8, marginBottom: 8, alignItems: "center" }}>
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "80px 120px 120px auto", gap: 8, marginBottom: 8, alignItems: "center" }}>
                 <strong>{s.slot} урок</strong>
                 <input value={s.start} onChange={e => updateSlot(i, "start", e.target.value)} placeholder="08:30" />
                 <input value={s.end} onChange={e => updateSlot(i, "end", e.target.value)} placeholder="09:15" />
                 <button className="secondary" style={{ width: "auto", padding: "6px 10px", color: "var(--danger)" }} onClick={() => removeSlot(i)}>×</button>
               </div>
             ))}
-
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
               <button className="secondary" onClick={addSlot} style={{ width: "auto" }}>+ Добавить</button>
               <button className="secondary" onClick={resetSlots} style={{ width: "auto" }}>Сброс</button>
-              <button onClick={saveSlots} style={{ width: "auto" }}>Сохранить</button>
+              <button onClick={saveSlotsFn} style={{ width: "auto" }}>Сохранить</button>
             </div>
           </div>
         </div>
@@ -365,14 +352,11 @@ export default function Admin() {
               <button onClick={handleCreateClass} style={{ width: "auto" }}>Добавить</button>
             </div>
           </div>
-
           {classes.map(c => (
             <div key={c.id} className="day-card" style={{ marginBottom: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <strong style={{ fontSize: 18, color: "var(--accent)" }}>{c.id}</strong>
-                <button className="secondary" style={{ width: "auto", fontSize: 12, padding: "4px 10px" }} onClick={() => handleDeleteClass(c.id)}>
-                  Удалить класс
-                </button>
+                <button className="secondary" style={{ width: "auto", fontSize: 12, padding: "4px 10px" }} onClick={() => handleDeleteClass(c.id)}>Удалить класс</button>
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
                 {(c.groups || []).map(g => (

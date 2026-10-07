@@ -31,8 +31,6 @@ export default function Schedule() {
 
   useEffect(() => {
     refreshUser();
-
-    // Подписка на событие profile-changed
     const handler = () => refreshUser();
     window.addEventListener("profile-changed", handler);
     return () => window.removeEventListener("profile-changed", handler);
@@ -41,7 +39,6 @@ export default function Schedule() {
   const refreshUser = () => {
     const stored = loadUser();
     const profile = loadProfile();
-
     let u = stored;
     if (!u && profile) {
       u = {
@@ -123,6 +120,7 @@ export default function Schedule() {
           const s = slots.find(x => x.slot === l.slot);
           const t = s ? `${s.start}–${s.end}` : "";
           const extra = l.extra ? " (доп.)" : "";
+          // Кабинет в PDF НЕ показываем
           return `${t} ${l.subject}${extra}`;
         }).join("\n")];
       });
@@ -173,6 +171,7 @@ export default function Schedule() {
         <div className="now-date">{DAYS_SHORT[todayIndex]}, {dateString}</div>
       </div>
 
+      {/* Сейчас идёт — БЕЗ кабинета */}
       {currentLesson ? (
         <div className="lesson-now">
           <div className="lesson-label">СЕЙЧАС ИДЁТ</div>
@@ -181,7 +180,6 @@ export default function Schedule() {
             {currentLesson.extra && <span style={{ fontSize: 14, marginLeft: 8, opacity: 0.8 }}>(доп.)</span>}
           </div>
           <div className="lesson-time">{currentLesson.time}</div>
-          {currentLesson.note && <div className="lesson-note">📌 {currentLesson.note}</div>}
           <div className="lesson-progress">
             <div className="lesson-progress-bar" style={{ width: `${progress * 100}%` }} />
           </div>
@@ -207,6 +205,7 @@ export default function Schedule() {
         </div>
       )}
 
+      {/* Список на сегодня — ЗДЕСЬ показываем кабинет */}
       {todayName && (
         <div style={{ marginTop: 32 }}>
           <h2 style={{ fontSize: 18, marginBottom: 16, color: "var(--accent)" }}>
@@ -223,8 +222,12 @@ export default function Schedule() {
                   <div className="lesson-row-subject">
                     {lesson.subject}
                     {lesson.extra && <span style={{ fontSize: 12, color: "var(--accent)", marginLeft: 8 }}>доп.</span>}
-                    {lesson.note && <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>📌 {lesson.note}</div>}
                   </div>
+                  {lesson.note && (
+                    <div className="lesson-row-room" title="Кабинет">
+                      🚪 {lesson.note}
+                    </div>
+                  )}
                   {isCurrent && <div className="lesson-row-badge">Сейчас</div>}
                 </div>
               );
@@ -233,6 +236,7 @@ export default function Schedule() {
         </div>
       )}
 
+      {/* Вся неделя — БЕЗ кабинета */}
       <div style={{ marginTop: 32 }}>
         <h2 style={{ fontSize: 18, marginBottom: 16, color: "var(--accent)" }}>Вся неделя</h2>
         <div className="schedule-grid">
