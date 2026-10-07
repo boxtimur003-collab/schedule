@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import Layout from "../components/Layout";
 import { getAllClasses } from "../lib/classes";
-import { loadProfile, saveProfile, clearProfile } from "../lib/storage";
+import { loadProfile, saveProfile } from "../lib/storage";
 
 export default function Settings() {
   const [user, setUser] = useState(null);
@@ -17,16 +17,9 @@ export default function Settings() {
     const stored = localStorage.getItem("user");
     const profile = loadProfile();
     let u = null;
-    if (stored) {
-      try { u = JSON.parse(stored); } catch (e) {}
-    }
-    if (!u && profile) {
-      u = { nick: "Гость", ...profile, role: "student", guest: true };
-    }
-    if (!u) {
-      router.push("/");
-      return;
-    }
+    if (stored) { try { u = JSON.parse(stored); } catch (e) {} }
+    if (!u && profile) u = { nick: "Гость", ...profile, role: "student", guest: true };
+    if (!u) { router.push("/"); return; }
     setUser(u);
     setDevice(profile?.device || "desktop");
     setGrade(profile?.grade || u.grade || "");
@@ -47,12 +40,6 @@ export default function Settings() {
     setTimeout(() => setSaved(""), 2000);
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("user");
-    clearProfile();
-    router.push("/");
-  };
-
   if (!user) return null;
 
   return (
@@ -70,7 +57,6 @@ export default function Settings() {
               <option value="desktop">ПК</option>
             </select>
           </div>
-
           <div className="field">
             <label>Класс</label>
             <select value={grade} onChange={e => {
@@ -81,21 +67,15 @@ export default function Settings() {
               {classes.map(c => <option key={c.id} value={c.id}>{c.id}</option>)}
             </select>
           </div>
-
           <div className="field">
             <label>Группа</label>
             <select value={group} onChange={e => setGroup(e.target.value)}>
               {currentGroups.map(g => <option key={g} value={g}>Группа {g}</option>)}
             </select>
           </div>
-
           <button onClick={handleSave}>Сохранить</button>
           {saved && <p style={{ color: "var(--ok)", marginTop: 12, textAlign: "center" }}>{saved}</p>}
         </div>
-
-        <button className="secondary" onClick={handleLogout} style={{ marginTop: 16 }}>
-          Выйти и удалить профиль
-        </button>
       </div>
     </Layout>
   );
