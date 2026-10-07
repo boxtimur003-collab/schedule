@@ -7,7 +7,7 @@ import { getAllClasses } from "../lib/classes";
 import { loadProfile, saveProfile } from "../lib/storage";
 
 export default function Home() {
-  const [mode, setMode] = useState("welcome"); // welcome | onboarding | login
+  const [mode, setMode] = useState("welcome");
   const [step, setStep] = useState(0);
   const [device, setDevice] = useState("");
   const [classes, setClasses] = useState([]);
@@ -55,6 +55,7 @@ export default function Home() {
       setError("Выбери класс и группу");
       return;
     }
+    // saveProfile сам синхронизирует user и profile
     saveProfile({ device, grade, group, onboardingDone: true });
     router.push("/schedule");
   };
@@ -67,7 +68,10 @@ export default function Home() {
       const cred = await signInWithEmailAndPassword(auth, email, password);
       const uDoc = await getDoc(doc(db, "users", cred.user.uid));
       const userData = uDoc.data();
-      localStorage.setItem("user", JSON.stringify({ uid: cred.user.uid, ...userData }));
+      const full = { uid: cred.user.uid, ...userData };
+      localStorage.setItem("user", JSON.stringify(full));
+      // Синхронизируем профиль
+      saveProfile({ device: "desktop", grade: userData.grade, group: userData.group, onboardingDone: true });
       if (userData.role === "admin") router.push("/admin");
       else router.push("/schedule");
     } catch (err) {
@@ -88,45 +92,32 @@ export default function Home() {
       position: "relative",
       overflow: "hidden"
     }}>
-      {/* Фоновый градиент */}
       <div style={{
-        position: "absolute",
-        top: "-30%",
-        left: "-20%",
-        width: "60%",
-        height: "60%",
+        position: "absolute", top: "-30%", left: "-20%", width: "60%", height: "60%",
         background: "radial-gradient(circle, rgba(255,122,24,0.15) 0%, transparent 60%)",
         pointerEvents: "none"
       }} />
       <div style={{
-        position: "absolute",
-        bottom: "-30%",
-        right: "-20%",
-        width: "60%",
-        height: "60%",
+        position: "absolute", bottom: "-30%", right: "-20%", width: "60%", height: "60%",
         background: "radial-gradient(circle, rgba(255,181,71,0.1) 0%, transparent 60%)",
         pointerEvents: "none"
       }} />
 
       <div style={{
-        maxWidth: 520,
-        width: "100%",
+        maxWidth: 520, width: "100%",
         background: "var(--bg-2)",
         border: "1px solid var(--border)",
-        borderRadius: 20,
-        padding: 40,
+        borderRadius: 20, padding: 40,
         boxShadow: "var(--shadow-lg)",
-        position: "relative",
-        zIndex: 1,
+        position: "relative", zIndex: 1,
         animation: "fadeIn 0.5s ease"
       }}>
 
-        {/* ===== Приветствие ===== */}
         {mode === "welcome" && (
           <>
             <div style={{ textAlign: "center", marginBottom: 32 }}>
               <div style={{ fontSize: 48, marginBottom: 12 }}>📅</div>
-              <h1 style={{ fontSize: 26, marginBottom: 8, letterSpacing: -0.5 }}>Расписание школы</h1>
+              <h1 style={{ fontSize: 26, marginBottom: 8 }}>Расписание школы</h1>
               <p style={{ color: "var(--text-dim)", fontSize: 15 }}>
                 Смотри расписание своего класса в реальном времени
               </p>
@@ -139,11 +130,7 @@ export default function Home() {
               <button className="secondary" onClick={() => setMode("login")}>
                 Войти в аккаунт
               </button>
-              <a href="/register" className="btn secondary" style={{
-                textAlign: "center",
-                textDecoration: "none",
-                display: "block"
-              }}>
+              <a href="/register" className="btn secondary" style={{ textAlign: "center", textDecoration: "none", display: "block" }}>
                 Зарегистрироваться
               </a>
             </div>
@@ -154,15 +141,12 @@ export default function Home() {
           </>
         )}
 
-        {/* ===== Онбординг ===== */}
         {mode === "onboarding" && (
           <>
             <div style={{ display: "flex", gap: 6, marginBottom: 28 }}>
               {[0, 1, 2].map(i => (
                 <div key={i} style={{
-                  flex: 1,
-                  height: 4,
-                  borderRadius: 999,
+                  flex: 1, height: 4, borderRadius: 999,
                   background: step >= i ? "var(--accent)" : "var(--bg-3)",
                   transition: "background 0.3s ease"
                 }} />
@@ -176,22 +160,15 @@ export default function Home() {
                   Выбери, чтобы мы подстроили интерфейс
                 </p>
                 <div style={{ display: "flex", gap: 12 }}>
-                  <button
-                    className="secondary"
-                    onClick={() => handleDevice("mobile")}
-                    style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: 24 }}
-                  >
+                  <button className="secondary" onClick={() => handleDevice("mobile")}
+                    style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: 24 }}>
                     <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <rect x="6" y="2" width="12" height="20" rx="2" />
-                      <line x1="12" y1="18" x2="12" y2="18" />
                     </svg>
                     <span>Мобильное</span>
                   </button>
-                  <button
-                    className="secondary"
-                    onClick={() => handleDevice("desktop")}
-                    style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: 24 }}
-                  >
+                  <button className="secondary" onClick={() => handleDevice("desktop")}
+                    style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: 24 }}>
                     <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <rect x="2" y="3" width="20" height="14" rx="2" />
                       <line x1="8" y1="21" x2="16" y2="21" />
@@ -254,7 +231,6 @@ export default function Home() {
           </>
         )}
 
-        {/* ===== Вход ===== */}
         {mode === "login" && (
           <>
             <h2 style={{ fontSize: 22, marginBottom: 24, textAlign: "center" }}>Вход в аккаунт</h2>

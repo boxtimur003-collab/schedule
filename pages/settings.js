@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import Layout from "../components/Layout";
 import { getAllClasses } from "../lib/classes";
-import { loadProfile, saveProfile } from "../lib/storage";
+import { loadProfile, loadUser, saveProfile } from "../lib/storage";
 
 export default function Settings() {
   const [user, setUser] = useState(null);
-  const [device, setDevice] = useState("");
+  const [device, setDevice] = useState("desktop");
   const [classes, setClasses] = useState([]);
   const [grade, setGrade] = useState("");
   const [group, setGroup] = useState("");
@@ -14,22 +14,36 @@ export default function Settings() {
   const router = useRouter();
 
   useEffect(() => {
-    const stored = localStorage.getItem("user");
+    const stored = loadUser();
     const profile = loadProfile();
-    let u = null;
-    if (stored) { try { u = JSON.parse(stored); } catch (e) {} }
-    if (!u && profile) u = { nick: "Гость", ...profile, role: "student", guest: true };
-    if (!u) { router.push("/"); return; }
+    let u = stored;
+    if (!u && profile) {
+      u = { nick: "Гость", grade: profile.grade, group: profile.group, role: "student", guest: true };
+    }
+    if (!u) {
+      router.push("/");
+      return;
+    }
     setUser(u);
-    setDevice(profile?.device || "desktop");
-    setGrade(profile?.grade || u.grade || "");
-    setGroup(profile?.group || u.group || "");
+
+    // Приоритет: user → profile
+    const currentDevice = u.device || profile?.device || "desktop";
+    const currentGrade = u.grade || profile?.grade || "";
+    const currentGroup = u.group || profile?.group || "";
+
+    setDevice(currentDevice);
+    setGrade(currentGrade);
+    setGroup(currentGroup);
     loadClasses();
   }, []);
 
   const loadClasses = async () => {
-    const list = await getAllClasses();
-    setClasses(list);
+    try {
+      const list = await getAllClasses();
+      setClasses(list);
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const currentGroups = classes.find(c => c.id === grade)?.groups || [];
@@ -37,6 +51,9 @@ export default function Settings() {
   const handleSave = () => {
     saveProfile({ device, grade, group, onboardingDone: true });
     setSaved("Сохранено");
+    // Обновляем локальный user
+    const updated = { ...user, grade, group, device };
+    setUser(updated);
     setTimeout(() => setSaved(""), 2000);
   };
 

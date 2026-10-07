@@ -6,7 +6,7 @@ import Layout from "../components/Layout";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import DownloadIcon from "../components/icons/DownloadIcon";
-import { loadProfile } from "../lib/storage";
+import { loadProfile, loadUser } from "../lib/storage";
 import { getTimeSlots } from "../lib/slots";
 
 const DAYS = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
@@ -17,7 +17,7 @@ const MONTHS = [
 ];
 
 export default function Schedule() {
-  const [user, setUser] = useState(null);       // либо аккаунт, либо из профиля
+  const [user, setUser] = useState(null);
   const [schedule, setSchedule] = useState(null);
   const [slots, setSlots] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -30,28 +30,38 @@ export default function Schedule() {
   }, []);
 
   useEffect(() => {
-    // Приоритет: аккаунт → профиль
-    const stored = localStorage.getItem("user");
+    refreshUser();
+
+    // Подписка на событие profile-changed
+    const handler = () => refreshUser();
+    window.addEventListener("profile-changed", handler);
+    return () => window.removeEventListener("profile-changed", handler);
+  }, []);
+
+  const refreshUser = () => {
+    const stored = loadUser();
     const profile = loadProfile();
 
-    let u = null;
-    if (stored) {
-      try { u = JSON.parse(stored); } catch (e) {}
-    }
+    let u = stored;
     if (!u && profile) {
-      u = { nick: profile.nick || "Гость", grade: profile.grade, group: profile.group, role: "student", guest: true };
+      u = {
+        nick: profile.nick || "Гость",
+        grade: profile.grade,
+        group: profile.group,
+        role: "student",
+        guest: true
+      };
     }
-
-    if (!u) {
+    if (!u || !u.grade || !u.group) {
       router.push("/");
       return;
     }
-
     setUser(u);
     loadAll(u);
-  }, []);
+  };
 
   const loadAll = async (u) => {
+    setLoading(true);
     try {
       const id = `${u.grade}-${u.group}`;
       const [snap, timeSlots] = await Promise.all([
@@ -66,16 +76,13 @@ export default function Schedule() {
     setLoading(false);
   };
 
-  // === Текущее время ===
   const todayIndex = now.getDay();
   const todayName = todayIndex === 0 ? null : DAYS[todayIndex - 1];
 
-  // Сегодняшние уроки — с разрешённым временем из slots
   const todayLessons = (() => {
     if (!todayName || !schedule) return [];
     const raw = schedule[todayName] || [];
     return raw.map(item => {
-      // item = { slot, subject, note, extra }
       const slotData = slots.find(s => s.slot === item.slot);
       if (!slotData) return { ...item, time: null, start: null, end: null };
       const [sh, sm] = slotData.start.split(":").map(Number);
@@ -152,11 +159,9 @@ export default function Schedule() {
       <div className="topbar">
         <h1>{user.grade} — группа {user.group}</h1>
         <div style={{ display: "flex", gap: 10 }}>
-          <a href="/settings" className="btn secondary" style={{
-            width: "auto", color: "var(--text)", background: "var(--bg-3)",
-            border: "1px solid var(--border)", padding: "8px 14px",
-            borderRadius: 8, textDecoration: "none", display: "flex", alignItems: "center", gap: 6
-          }}>⚙ Настройки</a>
+          <a href="/settings" className="btn secondary" style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: 6 }}>
+            ⚙ Настройки
+          </a>
           <button className="secondary" style={{ width: "auto", display: "flex", alignItems: "center", gap: 8 }} onClick={downloadPDF}>
             <DownloadIcon /> PDF
           </button>
